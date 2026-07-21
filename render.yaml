@@ -1,0 +1,17 @@
+services:
+  - type: web
+    name: automacao-b-presenca
+    runtime: python
+    plan: free
+    buildCommand: pip install -r requirements.txt
+    startCommand: gunicorn automacao_b_presenca:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
+    envVars:
+      - key: SYMPLA_TOKEN
+        sync: false
+      - key: BITRIX_WEBHOOK_URL
+        sync: false
+      - key: BITRIX_FIELD_SYMPLA_EVENT_ID
+        sync: false
+      - key: BITRIX_FIELD_PRESENTE_NO_EVENTO
+        sync: false

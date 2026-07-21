@@ -1,1 +1,1 @@
-# automacoes-eventos-sympla
+# automacao-crm-sympla
