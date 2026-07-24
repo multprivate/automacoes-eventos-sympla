@@ -17,6 +17,13 @@ jobs:
 
       - run: pip install -r requirements.txt
 
+      - uses: actions/cache/restore@v4
+        with:
+          path: .cache
+          key: sympla-processed-${{ github.run_id }}
+          restore-keys: |
+            sympla-processed-
+
       - run: python automacao_a_inscricoes.py
         env:
           SYMPLA_TOKEN: ${{ secrets.SYMPLA_TOKEN }}
@@ -26,3 +33,9 @@ jobs:
           BITRIX_FIELD_NOME_DO_EVENTO: ${{ secrets.BITRIX_FIELD_NOME_DO_EVENTO }}
           BITRIX_FIELD_SYMPLA_EVENT_ID: ${{ secrets.BITRIX_FIELD_SYMPLA_EVENT_ID }}
           BITRIX_FIELD_ORIGEM: ${{ secrets.BITRIX_FIELD_ORIGEM }}
+
+      - uses: actions/cache/save@v4
+        if: always()
+        with:
+          path: .cache
+          key: sympla-processed-${{ github.run_id }}

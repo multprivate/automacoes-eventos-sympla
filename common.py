@@ -4,6 +4,7 @@ chamadas à API do Bitrix24, chamadas à API da Sympla, e as funções de
 normalização/matching usadas pelas duas pontas.
 """
 
+import logging
 import os
 import re
 import unicodedata
@@ -13,13 +14,15 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
+log = logging.getLogger("common")
+
 SYMPLA_TOKEN = os.environ["SYMPLA_TOKEN"]
 BITRIX_WEBHOOK_URL = os.environ["BITRIX_WEBHOOK_URL"].rstrip("/")
 
 SYMPLA_BASE = "https://api.sympla.com.br/public/v1.5.1"
 
 STAGE_INSCRITO_PRO_EVENTO = os.environ.get("BITRIX_STAGE_INSCRITO_PRO_EVENTO", "UC_2CK7JY")
-STAGES_SAFE_TO_ADVANCE = {"NEW", "IN_PROCESS", "PROCESSED"}
+STAGES_SAFE_TO_ADVANCE = {"NEWLEAD", "NEWFUP"}
 
 FIELD_DATA_DO_EVENTO = os.environ.get("BITRIX_FIELD_DATA_DO_EVENTO", "")
 FIELD_NOME_DO_EVENTO = os.environ.get("BITRIX_FIELD_NOME_DO_EVENTO", "")
@@ -27,7 +30,10 @@ FIELD_SYMPLA_EVENT_ID = os.environ.get("BITRIX_FIELD_SYMPLA_EVENT_ID", "")
 FIELD_ORIGEM = os.environ.get("BITRIX_FIELD_ORIGEM", "")
 FIELD_PRESENTE_NO_EVENTO = os.environ.get("BITRIX_FIELD_PRESENTE_NO_EVENTO", "")
 
-ORIGEM_VALOR_FORMULARIO = "Formulario"  # texto; o ID é resolvido em runtime via resolve_enum_id
+ORIGEM_VALOR_FORMULARIO = "Formulario"                            # texto; o ID é resolvido em runtime via resolve_enum_id
+ORIGEM_VALOR_INSCRITO_DESCONHECIDO = "Inscrito Desconhecido"      # idem — inscrito sem cupom (ou cupom não mapeado); reaproveita valor já existente no portal
+ORIGEM_VALOR_CUPOM_DESCONTO = "Cupom de Desconto"                 # idem — inscrito com cupom de um assessor mapeado
+ORIGEM_VALOR_TRAFEGO_PAGO = "Trafego Pago"                        # idem — cupom de canal (não de assessor), ex: "MILETO"
 VALOR_PRESENTE = "Presente"             # idem
 VALOR_NAO_PRESENTE = "Não Presente"     # idem
 
@@ -57,26 +63,36 @@ def bitrix_list_all(method: str, payload: dict) -> list:
     start = 0
     url = f"{BITRIX_WEBHOOK_URL}/{method}"
     while True:
+        log.info("%s: buscando página (start=%s)...", method, start)
         resp = requests.post(url, json={**payload, "start": start}, timeout=30)
         resp.raise_for_status()
         body = resp.json()
         if "error" in body:
             raise RuntimeError(f"Bitrix24 error em {method}: {body}")
         results.extend(body["result"])
+        log.info("%s: %d registro(s) coletado(s) até agora.", method, len(results))
         if "next" not in body:
             break
         start = body["next"]
     return results
 
 
-def find_lead_ids_by_phone(phone: str) -> list[int]:
+def _find_lead_ids_by_comm(comm_type: str, value: str) -> list[int]:
     result = bitrix_call(
         "crm.duplicate.findbycomm",
-        {"entity_type": "LEAD", "type": "PHONE", "values": [phone]},
+        {"entity_type": "LEAD", "type": comm_type, "values": [value]},
     )
     if isinstance(result, list):
         return result
     return result.get("LEAD", [])
+
+
+def find_lead_ids_by_phone(phone: str) -> list[int]:
+    return _find_lead_ids_by_comm("PHONE", phone)
+
+
+def find_lead_ids_by_email(email: str) -> list[int]:
+    return _find_lead_ids_by_comm("EMAIL", normalize_email(email))
 
 
 _enum_id_cache: dict[tuple[str, str], str] = {}
@@ -104,6 +120,26 @@ def resolve_enum_id(field_code: str, value_text: str) -> str:
                 return item["ID"]
 
     raise ValueError(f"Item '{value_text}' não encontrado na lista do campo {field_code}")
+
+
+_user_id_cache: dict[str, int] = {}
+
+
+def resolve_user_id_by_email(email: str) -> int:
+    """Descobre o ID numérico de um usuário do Bitrix a partir do e-mail
+    (pra preencher ASSIGNED_BY_ID/"Pessoa Responsável"), e cacheia o
+    resultado. Requer que o webhook de entrada tenha permissão de usuários,
+    não só CRM."""
+    if email in _user_id_cache:
+        return _user_id_cache[email]
+
+    users = bitrix_call("user.get", {"filter": {"EMAIL": email}})
+    if not users:
+        raise ValueError(f"Nenhum usuário Bitrix encontrado com e-mail {email}")
+
+    user_id = int(users[0]["ID"])
+    _user_id_cache[email] = user_id
+    return user_id
 
 
 # ---------------------------------------------------------------------------
@@ -172,6 +208,62 @@ def get_sympla_all_participants(event_id: str) -> list[dict]:
     return participants
 
 
+def get_sympla_all_orders(event_id: str) -> list[dict]:
+    """Retorna TODOS os pedidos (orders) do evento, paginando — mesmo
+    padrão de get_sympla_all_participants. Cada pedido pode trazer um
+    cupom de desconto (discount_code) usado na inscrição."""
+    orders = []
+    page = 1
+    headers = {"s_token": SYMPLA_TOKEN}
+    while True:
+        url = f"{SYMPLA_BASE}/events/{event_id}/orders"
+        resp = requests.get(url, headers=headers, params={"page": page}, timeout=30)
+        resp.raise_for_status()
+        data = resp.json().get("data", [])
+        if not data:
+            break
+        orders.extend(data)
+        page += 1
+        sleep(0.3)
+    return orders
+
+
+def _is_no_discount_value(value: str) -> bool:
+    """A Sympla usa a string "0" (às vezes "0.00") pra indicar que o
+    pedido NÃO teve desconto — não é vazia/None, então "value or ''" não
+    pega esse caso: precisa checar o conteúdo."""
+    return value.strip().strip("0.") == ""
+
+
+def build_cupom_by_order_id(orders: list[dict]) -> dict[str, str]:
+    result = {}
+    for order in orders:
+        if order.get("id") is None:
+            continue
+        value = str(order.get("discount_code") or "").strip()
+        result[str(order["id"])] = "" if _is_no_discount_value(value) else value
+    return result
+
+
+def normalize_cupom(raw: str) -> str:
+    return (raw or "").strip().upper()
+
+
+def extract_discount_code(participant: dict, get_cupom_by_order_id) -> str:
+    """Resolve o cupom usado por um participante: primeiro tenta o campo
+    direto "order_discount" do participante, senão cai pro mapa
+    order_id -> discount_code (construído a partir de /orders).
+    get_cupom_by_order_id é um callable preguiçoso — só busca /orders se
+    o campo direto vier vazio e houver mesmo um order_id pra consultar."""
+    direct = str(participant.get("order_discount") or "").strip()
+    if direct and not _is_no_discount_value(direct):
+        return direct
+    order_id = participant.get("order_id")
+    if order_id is None:
+        return ""
+    return (get_cupom_by_order_id().get(str(order_id)) or "").strip()
+
+
 def extract_phone(participant: dict) -> str:
     """O telefone vem como resposta dentro de custom_form, atrelada à
     pergunta do formulário de inscrição (o texto pode variar entre
@@ -196,7 +288,7 @@ def format_phone_br(raw: str) -> str:
 
 
 # ---------------------------------------------------------------------------
-# Normalização / matching por nome
+# Normalização / matching por nome e e-mail
 # ---------------------------------------------------------------------------
 def normalize_name(raw: str) -> str:
     """Lowercase, remove acentos e colapsa espaços — pra comparar nomes
@@ -206,6 +298,12 @@ def normalize_name(raw: str) -> str:
     text = "".join(c for c in text if not unicodedata.combining(c))
     text = re.sub(r"\s+", " ", text)
     return text.strip()
+
+
+def normalize_email(raw: str) -> str:
+    """Lowercase + strip, pra comparar e-mail ignorando maiúsculas/espaços
+    (ex: " Joao@Empresa.COM " e "joao@empresa.com" devem bater)."""
+    return (raw or "").strip().lower()
 
 
 def participant_full_name(participant: dict) -> str:
