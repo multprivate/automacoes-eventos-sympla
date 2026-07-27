@@ -51,6 +51,7 @@ from common import (
     ORIGEM_VALOR_CUPOM_DESCONTO,
     ORIGEM_VALOR_INSCRITO_DESCONHECIDO,
     ORIGEM_VALOR_TRAFEGO_PAGO,
+    OLD_FUNNEL_STAGES,
     STAGE_INSCRITO_PRO_EVENTO,
     STAGES_SAFE_TO_ADVANCE,
 )
@@ -229,7 +230,13 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     log.info("Novo lead %s criado pro participante %s (%s) — origem=%s%s.", new_id, participant.get("id"), name, origem_valor, responsavel_info)
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, get_cupom_map) -> None:
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, get_cupom_map) -> bool:
+    """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
+    ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
+    errado e precisa ser tentado de novo na próxima execução. Só entra no
+    cache de "já processado" quem retorna True — assim uma falha transitória
+    (permissão, campo faltando, rede) nunca faz a gente perder o inscrito
+    pra sempre."""
     phone_raw = extract_phone(participant)
     phone_key = format_phone_br(phone_raw)
     email = participant.get("email") or ""
@@ -239,24 +246,34 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
         lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
     except Exception as exc:
         log.error("Falha ao buscar lead pro inscrito %s: %s", participant.get("id"), exc)
-        return
+        return False
 
     try:
         if lead_ids:
             for lead_id in lead_ids:
                 lead = get_lead(lead_id)
+                is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
                 fields = build_fields_to_advance(lead, event_name, event_date, event_id)
+                if is_old_funnel:
+                    # Defesa explícita: funil antigo pode ganhar os campos
+                    # do evento (visibilidade de que se inscreveu de novo),
+                    # mas o estágio nunca muda — mesmo que build_fields_to_advance
+                    # mude de regra no futuro.
+                    fields.pop("STATUS_ID", None)
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
-                    log.info("Lead %s atualizado (match por %s): %s", lead_id, match_method, fields)
+                    tag = " (funil antigo, só campos de evento)" if is_old_funnel else ""
+                    log.info("Lead %s atualizado (match por %s)%s: %s", lead_id, match_method, tag, fields)
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
         elif phone_key:
             create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, get_cupom_map)
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
+        return True
     except Exception as exc:
         log.error("Falha ao processar inscrito %s: %s", participant.get("id"), exc)
+        return False
 
 
 def process_event(event: dict, cache: dict[str, set[str]]) -> bool:
@@ -275,17 +292,28 @@ def process_event(event: dict, cache: dict[str, set[str]]) -> bool:
 
     log.info("%d inscrito(s) novo(s) em %s (id interno %s) de %d no total.", len(new_participants), event_name, event_id, len(participants))
     get_cupom_map = build_cupom_map_loader(event_id)
-    for participant in new_participants:
-        process_participant(participant, event_name, event_date, event_id, get_cupom_map)
+    newly_done = {
+        str(participant.get("id"))
+        for participant in new_participants
+        if process_participant(participant, event_name, event_date, event_id, get_cupom_map)
+    }
 
-    cache[event_id] = {str(p.get("id")) for p in participants}
+    if not newly_done:
+        return False
+    cache[event_id] = seen_ids | newly_done
     return True
 
 
 def main() -> None:
+    test_event_ids = {e.strip() for e in os.environ.get("TEST_EVENT_IDS", "").split(",") if e.strip()}
+
     cache = load_processed_cache()
     events = list_upcoming_events()
     log.info("%d evento(s) próximo(s) encontrado(s) na Sympla.", len(events))
+
+    if test_event_ids:
+        events = [e for e in events if e["id"] in test_event_ids]
+        log.info("Modo teste ativo (TEST_EVENT_IDS) — restrito a %d evento(s): %s", len(events), sorted(test_event_ids))
 
     cache_changed = False
     for event in events:

@@ -1,8 +1,10 @@
 name: Automação A - Sincronizar inscrições Sympla
 
 on:
-  schedule:
-    - cron: "*/7 * * * *"
+  # schedule pausado enquanto corrigimos bugs ativos e validamos em modo
+  # teste (ver plano) — reativar só depois da validação.
+  # schedule:
+  #   - cron: "*/7 * * * *"
   workflow_dispatch: {}
 
 jobs:

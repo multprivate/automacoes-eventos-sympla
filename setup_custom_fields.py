@@ -52,31 +52,6 @@ def create_string_field(field_name: str, label: str) -> str:
     return code
 
 
-def create_date_field(field_name: str, label: str) -> str:
-    existing = _find_field_by_name(field_name)
-    if existing:
-        code = existing["FIELD_NAME"]
-        print(f"Campo '{label}' já existe: {code}")
-        return code
-
-    result = bitrix_call(
-        "crm.lead.userfield.add",
-        {
-            "fields": {
-                "FIELD_NAME": field_name,
-                "USER_TYPE_ID": "date",
-                "EDIT_FORM_LABEL": {"pt": label},
-                "LIST_COLUMN_LABEL": {"pt": label},
-                "LIST_FILTER_LABEL": {"pt": label},
-            }
-        },
-    )
-    field = bitrix_call("crm.lead.userfield.list", {"filter": {"ID": result}})
-    code = field[0]["FIELD_NAME"]
-    print(f"Campo '{label}' criado: {code}")
-    return code
-
-
 def create_enum_field(field_name: str, label: str, values: list[str]) -> str:
     existing = _find_field_by_name(field_name)
     if existing:
@@ -136,7 +111,11 @@ def ensure_lead_stage(name_contains: str) -> str:
 def main() -> None:
     nome_evento_code = create_string_field("NOME_DO_EVENTO", "Nome do evento")
     sympla_event_id_code = create_string_field("SYMPLA_EVENT_ID", "ID do evento Sympla (técnico)")
-    data_evento_code = create_date_field("DATA_DO_EVENTO", "Data do evento")
+    # "Data do evento" não é mais gerenciado por este script: o código do
+    # campo foi trocado manualmente pra UF_CRM_1785161309 (fora da
+    # convenção UF_CRM_DATA_DO_EVENTO), então a checagem por FIELD_NAME
+    # exato não acha ele e cria um duplicado vazio. BITRIX_FIELD_DATA_DO_EVENTO
+    # já está setado direto no .env/secrets com o código certo.
     origem_code = create_enum_field(
         "ORIGEM",
         "Origem",
@@ -148,7 +127,7 @@ def main() -> None:
     print()
     print("Cole no .env:")
     print(f"BITRIX_STAGE_INSCRITO_PRO_EVENTO={stage_code}")
-    print(f"BITRIX_FIELD_DATA_DO_EVENTO={data_evento_code}")
+    print("BITRIX_FIELD_DATA_DO_EVENTO=UF_CRM_1785161309  # já setado, gerenciado manualmente")
     print(f"BITRIX_FIELD_NOME_DO_EVENTO={nome_evento_code}")
     print(f"BITRIX_FIELD_SYMPLA_EVENT_ID={sympla_event_id_code}")
     print(f"BITRIX_FIELD_ORIGEM={origem_code}")

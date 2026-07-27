@@ -24,6 +24,14 @@ SYMPLA_BASE = "https://api.sympla.com.br/public/v1.5.1"
 STAGE_INSCRITO_PRO_EVENTO = os.environ.get("BITRIX_STAGE_INSCRITO_PRO_EVENTO", "UC_2CK7JY")
 STAGES_SAFE_TO_ADVANCE = {"NEWLEAD", "NEWFUP"}
 
+# Estágios do funil antigo (pré-reformulação do pipeline) — um Lead nesses
+# estágios pode ganhar os campos de evento (Data/Nome/ID Sympla) quando
+# bate uma inscrição nova, pra dar visibilidade, mas o STATUS_ID nunca
+# muda: a automação não "promove" ninguém de volta pro funil novo sozinha.
+# Note que UC_TJ9FPC ("Reunião") NÃO entra aqui apesar de não ter o
+# prefixo [NEW]: é do funil novo.
+OLD_FUNNEL_STAGES = {"NEW", "IN_PROCESS", "PROCESSED", "UC_DQZKWD", "UC_PFVCRN", "UC_Z0M384", "UC_VL3WIF"}
+
 FIELD_DATA_DO_EVENTO = os.environ.get("BITRIX_FIELD_DATA_DO_EVENTO", "")
 FIELD_NOME_DO_EVENTO = os.environ.get("BITRIX_FIELD_NOME_DO_EVENTO", "")
 FIELD_SYMPLA_EVENT_ID = os.environ.get("BITRIX_FIELD_SYMPLA_EVENT_ID", "")

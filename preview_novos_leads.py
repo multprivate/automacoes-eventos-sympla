@@ -16,6 +16,7 @@ Uso:
 """
 
 import logging
+import os
 
 from automacao_a_inscricoes import (
     build_cupom_map_loader,
@@ -32,6 +33,7 @@ from common import (
     list_upcoming_events,
     participant_full_name,
     resolve_user_id_by_email,
+    OLD_FUNNEL_STAGES,
 )
 
 logging.basicConfig(level=logging.WARNING, format="%(asctime)s [%(levelname)s] %(message)s")
@@ -50,9 +52,13 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
     if lead_ids:
         for lead_id in lead_ids:
             lead = get_lead(lead_id)
+            is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
             fields = build_fields_to_advance(lead, event_name, event_date, event_id)
+            if is_old_funnel:
+                fields.pop("STATUS_ID", None)
+            tag = " [FUNIL ANTIGO - só campos de evento, estágio intocado]" if is_old_funnel else ""
             if fields:
-                print(f"  [ATUALIZARIA] {pid} {full_name} -> Lead {lead_id} (match {match_method}): {fields}")
+                print(f"  [ATUALIZARIA]{tag} {pid} {full_name} -> Lead {lead_id} (match {match_method}): {fields}")
             else:
                 print(f"  [SEM MUDANÇA] {pid} {full_name} -> Lead {lead_id} (match {match_method}) já está em dia")
         return
@@ -91,8 +97,15 @@ def preview_event(event: dict) -> None:
 
 
 def main() -> None:
+    test_event_ids = {e.strip() for e in os.environ.get("TEST_EVENT_IDS", "").split(",") if e.strip()}
+
     events = list_upcoming_events()
     print(f"{len(events)} evento(s) próximo(s) encontrado(s) na Sympla.")
+
+    if test_event_ids:
+        events = [e for e in events if e["id"] in test_event_ids]
+        print(f"Modo teste ativo (TEST_EVENT_IDS) — restrito a {len(events)} evento(s): {sorted(test_event_ids)}")
+
     for event in events:
         preview_event(event)
 
