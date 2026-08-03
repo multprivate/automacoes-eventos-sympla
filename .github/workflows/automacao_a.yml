@@ -1,9 +1,25 @@
 name: Automação A - Sincronizar inscrições Sympla
 
 on:
+  # Backstop: o schedule nativo do GitHub Actions é deprioritizado sob carga
+  # da plataforma e na prática dispara a cada poucas horas, não a cada 30min
+  # (ver docs/ARQUITETURA.md). O disparo confiável de verdade é externo, via
+  # cron-job.org chamando a API workflow_dispatch a cada 10min — isso não
+  # sofre a mesma deprioritização. Este schedule só existe como rede de
+  # segurança caso o disparo externo falhe (PAT expirado, cron-job.org fora
+  # do ar).
   schedule:
-    - cron: "*/7 * * * *"
+    - cron: "*/30 * * * *"
   workflow_dispatch: {}
+
+# Serializa qualquer execução (schedule, dispatch externo, disparo manual)
+# numa fila única. Necessário porque dois runs paralelos processando o
+# mesmo inscrito novo pela primeira vez podem criar Lead duplicado no
+# Bitrix (a idempotência do script só protege contra reprocessar quem já
+# foi tratado, não contra essa corrida).
+concurrency:
+  group: automacao-a
+  cancel-in-progress: false
 
 jobs:
   sync:
@@ -33,6 +49,8 @@ jobs:
           BITRIX_FIELD_NOME_DO_EVENTO: ${{ secrets.BITRIX_FIELD_NOME_DO_EVENTO }}
           BITRIX_FIELD_SYMPLA_EVENT_ID: ${{ secrets.BITRIX_FIELD_SYMPLA_EVENT_ID }}
           BITRIX_FIELD_ORIGEM: ${{ secrets.BITRIX_FIELD_ORIGEM }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
 
       - uses: actions/cache/save@v4
         if: always()

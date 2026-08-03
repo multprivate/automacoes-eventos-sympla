@@ -1,0 +1,40 @@
+{% extends "base.html" %}
+{% block title %}Dashboard{% endblock %}
+{% block content %}
+<h2>Dashboard</h2>
+<p>Visão geral da sincronização Sympla ↔ Bitrix24</p>
+
+<div class="grid">
+    <article>
+        <p><small>Eventos sincronizados</small></p>
+        <h3>{{ total_sincronizados }} <small>de {{ total_disponiveis }} futuros</small></h3>
+    </article>
+    <article>
+        <p><small>Última sincronização</small></p>
+        <h3>{{ ultima_execucao.finalizado_em if ultima_execucao else "—" }}</h3>
+        {% if ultima_execucao %}<small>status: {{ ultima_execucao.status }}</small>{% endif %}
+    </article>
+</div>
+
+<h3>Eventos</h3>
+<table>
+    <thead>
+        <tr><th>Evento</th><th>Data</th><th>Inscritos</th><th>Presentes</th><th>Último sync</th><th>Ativo</th></tr>
+    </thead>
+    <tbody>
+        {% for e in eventos %}
+        <tr>
+            <td>{{ e.nome }}</td>
+            <td>{{ e.data }}</td>
+            <td>{{ e.inscritos }}</td>
+            <td>{{ e.presentes }}</td>
+            <td>{{ e.ultimo_sync or "nunca" }}</td>
+            <td>{{ "✅" if e.ativo else "⏸️" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">Nenhum evento futuro encontrado na Sympla agora.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+<p><a href="{{ url_for('eventos.index') }}">Ver aba Eventos para sincronizar/pausar/remover →</a></p>
+{% endblock %}

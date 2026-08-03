@@ -1,0 +1,27 @@
+{% extends "base.html" %}
+{% block title %}Mapeamento{% endblock %}
+{% block content %}
+<h2>Mapeamento (campos e estágio do Bitrix)</h2>
+<p>Editar aqui vale pra próxima sincronização (o motor cacheia por 60s). Campo em branco não apaga o valor atual — só edite o que quiser trocar de verdade.</p>
+<p><small>"Presente no evento" (Automação B) não aparece aqui — continua configurado direto no serviço da Automação B, sem depender desta tabela.</small></p>
+<form method="post">
+    <table>
+        <thead>
+            <tr><th>Chave</th><th>Valor efetivo</th><th>Descrição</th></tr>
+        </thead>
+        <tbody>
+            {% for l in linhas %}
+            <tr>
+                <td>
+                    <code>{{ l.chave }}</code>
+                    <input type="hidden" name="chave" value="{{ l.chave }}">
+                </td>
+                <td><input type="text" name="valor_{{ l.chave }}" value="{{ l.valor }}"></td>
+                <td>{{ l.descricao }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    <button type="submit">Salvar alterações</button>
+</form>
+{% endblock %}

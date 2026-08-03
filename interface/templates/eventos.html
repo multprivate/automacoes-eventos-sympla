@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Eventos{% endblock %}
+{% block content %}
+<h2>Eventos Sincronizados</h2>
+<p>Gerencie quais eventos Sympla enviam participantes para o Bitrix24</p>
+
+<table>
+    <thead>
+        <tr>
+            <th>Evento</th><th>Data</th><th>Inscritos</th><th>Presentes</th>
+            <th>Último sync</th><th>Status</th><th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in eventos %}
+        <tr>
+            <td>{{ e.nome }}<br><small><code>{{ e.id }}</code></small></td>
+            <td>{{ e.data }}</td>
+            <td>{{ e.inscritos }}</td>
+            <td>{{ e.presentes }}</td>
+            <td>{{ e.ultimo_sync or "nunca" }}</td>
+            <td>
+                {% if e.removido %}removido
+                {% elif e.ativo %}ativo
+                {% else %}inativo
+                {% endif %}
+            </td>
+            <td>
+                <form method="post" action="{{ url_for('eventos.sincronizar', event_id=e.id) }}" style="display:inline">
+                    <button type="submit" {{ "disabled" if e.removido else "" }}>Sincronizar agora</button>
+                </form>
+                <form method="post" action="{{ url_for('eventos.forcar', event_id=e.id) }}" style="display:inline" onsubmit="return confirm('Forçar atualização de campos em TODOS os inscritos de {{ e.nome }}?');">
+                    <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }}>Forçar atualização de campos</button>
+                </form>
+                <form method="post" action="{{ url_for('eventos.toggle', event_id=e.id) }}" style="display:inline">
+                    <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }}>{{ "Desativar" if e.ativo else "Ativar" }}</button>
+                </form>
+                {% if not e.removido %}
+                <form method="post" action="{{ url_for('eventos.remover', event_id=e.id) }}" style="display:inline" onsubmit="return confirm('Remover {{ e.nome }} da sincronização automática?');">
+                    <button type="submit" class="secondary">Remover</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">Nenhum evento futuro encontrado na Sympla agora.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+{% endblock %}

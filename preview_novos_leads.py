@@ -18,7 +18,7 @@ Uso:
 import logging
 import os
 
-from automacao_a_inscricoes import (
+from services.lead_sync_service import (
     build_cupom_map_loader,
     build_fields_to_advance,
     find_matching_lead_ids,
@@ -53,7 +53,10 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
         for lead_id in lead_ids:
             lead = get_lead(lead_id)
             is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
-            fields = build_fields_to_advance(lead, event_name, event_date, event_id)
+            # filtrar_evento_id sempre "" aqui: resolver de verdade passaria
+            # por ensure_enum_value, que pode ESCREVER (cria item de lista
+            # novo) — quebraria a garantia read-only deste script.
+            fields = build_fields_to_advance(lead, event_name, event_date, event_id, "")
             if is_old_funnel:
                 fields.pop("STATUS_ID", None)
             tag = " [FUNIL ANTIGO - só campos de evento, estágio intocado]" if is_old_funnel else ""
