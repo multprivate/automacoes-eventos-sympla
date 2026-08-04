@@ -4,8 +4,9 @@
     --color-border: #e5e7eb;
     --color-text: #1f2430;
     --color-text-muted: #6b7280;
-    --color-primary: #4f46e5;
-    --color-primary-hover: #4338ca;
+    --color-primary: #1d536f;
+    --color-primary-hover: #164256;
+    --color-accent: #b58e3e;
     --color-success: #15803d;
     --color-success-bg: #dcfce7;
     --color-danger: #b91c1c;
@@ -25,8 +26,9 @@
         --color-border: #2a2f3a;
         --color-text: #e5e7eb;
         --color-text-muted: #9aa1ae;
-        --color-primary: #818cf8;
-        --color-primary-hover: #a5b4fc;
+        --color-primary: #6fa8c9;
+        --color-primary-hover: #8fc0dc;
+        --color-accent: #d4ac5c;
         --color-success: #4ade80;
         --color-success-bg: #123420;
         --color-danger: #f87171;
@@ -70,7 +72,11 @@ nav.topbar .brand {
     font-weight: 700;
     font-size: 1.05rem;
     letter-spacing: -.01em;
+    display: flex;
+    align-items: center;
+    gap: .55rem;
 }
+nav.topbar .brand img { height: 26px; width: 26px; display: block; }
 nav.topbar ul {
     list-style: none;
     display: flex;
@@ -89,7 +95,7 @@ nav.topbar a {
     transition: color .15s ease, border-color .15s ease;
 }
 nav.topbar a:hover { color: var(--color-text); border-color: var(--color-border); }
-nav.topbar a.active { color: var(--color-primary); border-color: var(--color-primary); }
+nav.topbar a.active { color: var(--color-primary); border-color: var(--color-accent); }
 
 /* Typography ----------------------------------------------------------*/
 h2 { font-size: 1.55rem; letter-spacing: -.01em; margin: 0 0 .3rem; }
