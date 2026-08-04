@@ -30,6 +30,8 @@ from common import (
     build_cupom_by_order_id,
     ensure_enum_value,
     extract_discount_code,
+    find_contact_ids_by_email,
+    find_contact_ids_by_phone,
     find_lead_ids_by_email,
     find_lead_ids_by_phone,
     format_event_label,
@@ -44,14 +46,34 @@ from common import (
     participant_full_name,
     resolve_enum_id,
     resolve_user_id_by_email,
+    spa_add_item,
+    spa_find_item_by_sympla_event_id,
+    spa_update_item,
+    FIELD_PARENT_ID_EVENTO_SPA,
+    FIELD_SPA_NOME_EVENTO,
+    FIELD_SPA_SYMPLA_EVENT_ID,
+    FIELD_SPA_TOTAL_FALTOSOS,
+    FIELD_SPA_TOTAL_INSCRITOS,
+    FIELD_SPA_TOTAL_PRESENTES,
+    FIELD_SPA_ULTIMA_SINCRONIZACAO,
     OLD_FUNNEL_STAGES,
 )
 from domain.campo_extra_mapeamento import resolve_extra_fields
-from domain.matching import find_matching_lead_ids as _find_matching_lead_ids
+from domain.matching import (
+    choose_primary_contact_id,
+    contact_needs_new_lead,
+    find_matching_contact_ids as _find_matching_contact_ids,
+    find_matching_lead_ids as _find_matching_lead_ids,
+)
 from domain.stage_rules import build_fields_to_advance
 from repositories import eventos_config_repo, logs_repo, processed_repo
 from services import campo_mapeamento_service, config_service
 from services.coupon_service import resolve_assessor_and_origem
+
+# Estágios "fechados" padrão do Bitrix — um Lead nesses estágios não conta
+# como "aberto no funil" pra decidir se um cliente (Contato) precisa de um
+# Lead novo representando o interesse no evento.
+LEAD_CLOSED_STAGES = {"CONVERTED", "JUNK"}
 
 log = logging.getLogger("services.lead_sync_service")
 
@@ -108,6 +130,65 @@ def find_matching_lead_ids(phone_key: str, email: str, full_name: str) -> tuple[
     )
 
 
+def find_matching_contact_ids(phone_key: str, email: str) -> tuple[list[int], str | None]:
+    """Fina casca sobre domain.matching para Contatos (clientes) — telefone
+    e e-mail só, sem fallback por nome (ver domain/matching.py)."""
+    return _find_matching_contact_ids(
+        phone_key,
+        email,
+        lookup_by_phone=find_contact_ids_by_phone,
+        lookup_by_email=find_contact_ids_by_email,
+    )
+
+
+def _already_linked_to_item(entity: dict, item_id: int) -> bool:
+    """Bitrix guarda PARENT_ID_1112 como string (ex: "28"), não int —
+    compara normalizado, senão o diff-check acha diferença toda vez e
+    reenvia o campo numa rodada que não precisava."""
+    return str(entity.get(FIELD_PARENT_ID_EVENTO_SPA)) == str(item_id)
+
+
+def _find_open_lead_ids_for_contact(contact_id: int) -> list[int]:
+    leads = bitrix_list_all("crm.lead.list", {"filter": {"CONTACT_ID": contact_id}, "select": ["ID", "STATUS_ID"]})
+    return [int(lead["ID"]) for lead in leads if lead.get("STATUS_ID") not in LEAD_CLOSED_STAGES]
+
+
+def _find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date: str, inscritos_count: int, presentes_count: int) -> int | None:
+    """Acha (ou cria) o item da SPA nativa "Eventos Sympla" pra esse
+    evento, e atualiza os campos agregados (Total de Inscritos/Presentes/
+    Faltosos, Última Sincronização, Nome do Evento). Fail-ABERTO: se
+    qualquer chamada falhar, loga e retorna None — a sincronização de
+    Lead/Contato continua normalmente, só sem o vínculo com a SPA nesta
+    rodada (tentará de novo na próxima).
+
+    Nunca mexe em stageId (a coluna Kanban do item) — isso é decisão
+    humana/comercial, mesmo espírito da defesa que já existe pra nunca
+    promover sozinho um Lead de funil antigo."""
+    stat_fields = {
+        FIELD_SPA_TOTAL_INSCRITOS: inscritos_count,
+        FIELD_SPA_TOTAL_PRESENTES: presentes_count,
+        FIELD_SPA_TOTAL_FALTOSOS: inscritos_count - presentes_count,
+        FIELD_SPA_ULTIMA_SINCRONIZACAO: datetime.now(timezone.utc).strftime("%Y-%m-%d"),
+        FIELD_SPA_NOME_EVENTO: event_name,
+    }
+    try:
+        item = spa_find_item_by_sympla_event_id(sympla_event_id)
+        if item is None:
+            item_id = spa_add_item({
+                "title": f"{event_name} ({event_date})" if event_date else event_name,
+                FIELD_SPA_SYMPLA_EVENT_ID: sympla_event_id,
+                **stat_fields,
+            })
+            log.info("Item novo criado na SPA Eventos Sympla pro evento %s (id interno %s): item %s.", event_name, sympla_event_id, item_id)
+        else:
+            item_id = int(item["id"])
+            spa_update_item(item_id, stat_fields)
+        return item_id
+    except Exception as exc:
+        log.warning("Falha ao achar/criar item da SPA Eventos Sympla pra %s (id interno %s): %s", event_name, sympla_event_id, exc)
+        return None
+
+
 def build_cupom_map_loader(event_id: str):
     """Closure memoizado: só busca /orders da Sympla se algum participante
     novo realmente precisar (nenhum campo direto de cupom disponível)."""
@@ -121,7 +202,12 @@ def build_cupom_map_loader(event_id: str):
     return get
 
 
-def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict]) -> None:
+def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None) -> int:
+    """Cria um Lead novo. contact_id/item_id são usados no branch "cliente"
+    (Contato já existente sem Lead aberto no funil): mesma lógica de
+    cupom→assessor/origem de sempre também se aplica aqui — decisão
+    confirmada com o usuário, um cliente que se inscreve com cupom de um
+    assessor ainda deve gerar essa atribuição. Retorna o ID do Lead criado."""
     name = participant_full_name(participant)
     assessor_email, origem_valor = resolve_assessor_and_origem(cupom)
 
@@ -145,15 +231,73 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
         fields["ASSIGNED_BY_ID"] = resolve_user_id_by_email(assessor_email)
     if email:
         fields["EMAIL"] = [{"VALUE": normalize_email(email), "VALUE_TYPE": "WORK"}]
+    if contact_id:
+        fields["CONTACT_ID"] = contact_id
+    if item_id:
+        fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
     fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=None))
 
     new_id = bitrix_call("crm.lead.add", {"fields": fields})
     stats["leads_criados"] += 1
     responsavel_info = f", responsável={assessor_email}" if assessor_email else ""
     log.info("Novo lead %s criado pro participante %s (%s) — origem=%s%s.", new_id, participant.get("id"), name, origem_valor, responsavel_info)
+    return int(new_id)
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], force: bool = False) -> bool:
+def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool) -> None:
+    """Branch "cliente": o inscrito bateu com um Contato já existente.
+    Vincula o Contato ao item do evento; se o Contato não tem nenhum Lead
+    aberto no funil, cria um Lead novo (mesma lógica de cupom→assessor de
+    sempre); se já tem, só garante que esse(s) Lead(s) também fiquem
+    vinculados ao evento — não mexe em estágio/responsável de um Lead que
+    já existia.
+
+    Se bater com MAIS de um Contato (dado duplicado pré-existente no
+    Bitrix — mesmo e-mail/telefone em dois registros — não causado pela
+    automação), processa só o de ID mais baixo (domain.matching::
+    choose_primary_contact_id) e REGISTRA o duplicado em
+    execucoes_log_itens pra revisão/mesclagem manual, em vez de criar um
+    Lead por Contato duplicado. Mesclar Contatos de verdade é uma tarefa
+    separada — mexe em dado real de cliente (histórico de negociação,
+    atividades), risco maior do que qualquer coisa que a automação já faz."""
+    if len(contact_ids) > 1:
+        primary_id = choose_primary_contact_id(contact_ids)
+        log.warning(
+            "Inscrito %s bateu com %d Contatos diferentes (dado duplicado no Bitrix, não criado pela automação): %s — usando o Contato %s (menor ID), demais ignorados.",
+            participant.get("id"), len(contact_ids), contact_ids, primary_id,
+        )
+        logs_repo.insert_item(
+            "CONTATO_DUPLICADO", "participante", f"participant #{participant.get('id')}", "ok", 0,
+            sympla_event_id=event_id,
+            detalhes={"contact_ids": contact_ids, "contact_id_usado": primary_id},
+        )
+        contact_ids = [primary_id]
+
+    for contact_id in contact_ids:
+        contact = bitrix_call("crm.contact.get", {"id": contact_id})
+        if item_id and (force or not _already_linked_to_item(contact, item_id)):
+            bitrix_call("crm.contact.update", {"id": contact_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
+            log.info("Contato %s vinculado ao evento %s (item %s).", contact_id, event_name, item_id)
+
+        open_lead_ids = _find_open_lead_ids_for_contact(contact_id)
+        if contact_needs_new_lead(open_lead_ids):
+            create_lead_from_participant(
+                participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
+                stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
+                contact_id=contact_id, item_id=item_id,
+            )
+        else:
+            for lead_id in open_lead_ids:
+                if not item_id:
+                    continue
+                lead = get_lead(lead_id)
+                if force or not _already_linked_to_item(lead, item_id):
+                    bitrix_call("crm.lead.update", {"id": lead_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
+                    stats["leads_atualizados"] += 1
+                    log.info("Lead %s (cliente já com Lead aberto) vinculado ao evento %s (item %s).", lead_id, event_name, item_id)
+
+
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False) -> bool:
     """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
     ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
     errado e precisa ser tentado de novo na próxima execução. Só entra na
@@ -163,7 +307,15 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
 
     force=True ("Forçar atualização de campos" no painel) reenvia os campos
     de evento mesmo que já estejam iguais — não afeta a lógica de STATUS_ID
-    nem a defesa de funil antigo, só os campos de data/nome/id do evento."""
+    nem a defesa de funil antigo, só os campos de data/nome/id do evento.
+
+    item_id (id do item na SPA "Eventos Sympla") é resolvido uma vez por
+    evento em process_event() — pode ser None se a SPA estiver indisponível
+    (fail-aberto), nesse caso simplesmente não vincula nada à SPA nesta
+    rodada, sem afetar a sincronização de Lead/Contato de verdade.
+
+    Roda a cascata de Contato (cliente) ANTES da cascata de Lead
+    (prospect) — ver domain/matching.py::find_matching_contact_ids."""
     phone_raw = extract_phone(participant)
     phone_key = format_phone_br(phone_raw)
     email = participant.get("email") or ""
@@ -175,6 +327,22 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
         "nome_completo": full_name,
         "email": email,
     }
+
+    try:
+        contact_ids, _contact_match_method = find_matching_contact_ids(phone_key, email)
+    except Exception as exc:
+        log.error("Falha ao buscar contato (cliente) pro inscrito %s: %s", participant.get("id"), exc)
+        stats["erros"] += 1
+        return False
+
+    if contact_ids:
+        try:
+            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force)
+            return True
+        except Exception as exc:
+            log.error("Falha ao processar cliente (contato) pro inscrito %s: %s", participant.get("id"), exc)
+            stats["erros"] += 1
+            return False
 
     try:
         lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
@@ -203,6 +371,8 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                     # mude de regra no futuro.
                     fields.pop("STATUS_ID", None)
                 fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=lead, force=force))
+                if item_id and (force or not _already_linked_to_item(lead, item_id)):
+                    fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
@@ -211,7 +381,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
         elif phone_key:
-            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos)
+            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id)
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
         return True
@@ -249,14 +419,19 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
         logs_repo.insert_item(acao, "evento", f"event #{event_id}", status, duracao_ms, sympla_event_id=event_id, erro=erro)
 
     participants = get_sympla_all_participants(event_id)
+    presentes_count = sum(1 for p in participants if (p.get("checkin") or {}).get("check_in_date"))
 
     try:
-        presentes_count = sum(1 for p in participants if (p.get("checkin") or {}).get("check_in_date"))
         eventos_config_repo.upsert_sync_result(event_id, event_name, event_date, len(participants), presentes_count)
     except Exception as exc:
         # Só alimenta os contadores do Dashboard/aba Eventos — nunca deve
         # bloquear a sincronização de verdade no Bitrix.
         log.warning("Falha ao atualizar eventos_config de %s: %s", event_id, exc)
+
+    # Item da SPA nativa "Eventos Sympla" do Bitrix — fail-aberto (None se
+    # indisponível, process_participant simplesmente não vincula nada à
+    # SPA nesta rodada).
+    item_id = _find_or_create_evento_item(event_id, event_name, event_date, len(participants), presentes_count)
 
     if force:
         participants_to_process = participants
@@ -292,7 +467,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
     newly_done = {
         str(participant.get("id"))
         for participant in participants_to_process
-        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, force=force)
+        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force)
     }
 
     if not newly_done:

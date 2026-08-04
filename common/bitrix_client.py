@@ -49,22 +49,30 @@ def bitrix_list_all(method: str, payload: dict) -> list:
     return results
 
 
-def _find_lead_ids_by_comm(comm_type: str, value: str) -> list[int]:
+def _find_ids_by_comm(entity_type: str, comm_type: str, value: str) -> list[int]:
     result = bitrix_call(
         "crm.duplicate.findbycomm",
-        {"entity_type": "LEAD", "type": comm_type, "values": [value]},
+        {"entity_type": entity_type, "type": comm_type, "values": [value]},
     )
     if isinstance(result, list):
         return result
-    return result.get("LEAD", [])
+    return result.get(entity_type, [])
 
 
 def find_lead_ids_by_phone(phone: str) -> list[int]:
-    return _find_lead_ids_by_comm("PHONE", phone)
+    return _find_ids_by_comm("LEAD", "PHONE", phone)
 
 
 def find_lead_ids_by_email(email: str) -> list[int]:
-    return _find_lead_ids_by_comm("EMAIL", normalize_email(email))
+    return _find_ids_by_comm("LEAD", "EMAIL", normalize_email(email))
+
+
+def find_contact_ids_by_phone(phone: str) -> list[int]:
+    return _find_ids_by_comm("CONTACT", "PHONE", phone)
+
+
+def find_contact_ids_by_email(email: str) -> list[int]:
+    return _find_ids_by_comm("CONTACT", "EMAIL", normalize_email(email))
 
 
 _enum_id_cache: dict[tuple[str, str], str] = {}
