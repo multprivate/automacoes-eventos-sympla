@@ -67,6 +67,7 @@ from domain.matching import (
 )
 from domain.stage_rules import build_fields_to_advance
 from repositories import eventos_config_repo, logs_repo, processed_repo
+from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
 from services import campo_mapeamento_service, config_service
 from services.coupon_service import resolve_assessor_and_origem
 
@@ -509,30 +510,47 @@ def _filter_eventos_ativos(events: list[dict]) -> list[dict]:
 def sync_all_upcoming_events(test_event_ids: set[str] | None = None) -> dict:
     """Fluxo de sempre: todos os eventos futuros, só participantes novos
     desde a última execução. Usado pelo Cron Job agendado. Grava um resumo
-    em execucoes_log ao final (melhor esforço — alimenta o Dashboard)."""
-    iniciado_em = datetime.now(timezone.utc)
-    events = list_upcoming_events()
-    log.info("%d evento(s) próximo(s) encontrado(s) na Sympla.", len(events))
+    em execucoes_log ao final (melhor esforço — alimenta o Dashboard).
 
-    if test_event_ids:
-        events = [e for e in events if e["id"] in test_event_ids]
-        log.info("Modo teste ativo (TEST_EVENT_IDS) — restrito a %d evento(s): %s", len(events), sorted(test_event_ids))
-    else:
-        events = _filter_eventos_ativos(events)
-
-    stats = _new_stats()
-    status = "ok"
+    Adquire a trava 'global' (sync_locks) antes de começar — sem isso, um
+    Cron Job cuja execução atrasa (evento com muitos inscritos novos)
+    corre o risco de sobrepor com a próxima execução agendada. Antes,
+    quem garantia isso era só o `concurrency: group: automacao-a` do
+    GitHub Actions; agora que o motor tem dois pontos de entrada (Cron Job
+    + painel), precisa ser explícito. Se a trava já estiver em uso, pula
+    esta execução sem erro — a próxima tentativa (10min depois) resolve."""
     try:
-        for event in events:
-            stats["eventos_processados"] += 1
-            process_event(event, stats)
-    except Exception:
-        status = "error"
-        raise
-    finally:
-        logs_repo.insert_execucao("A", iniciado_em, datetime.now(timezone.utc), status, stats)
+        acquire_lock("global", "cron")
+    except SyncLockHeld as exc:
+        log.warning("Execução agendada pulada, trava global em uso: %s", exc)
+        return _new_stats()
 
-    return stats
+    try:
+        iniciado_em = datetime.now(timezone.utc)
+        events = list_upcoming_events()
+        log.info("%d evento(s) próximo(s) encontrado(s) na Sympla.", len(events))
+
+        if test_event_ids:
+            events = [e for e in events if e["id"] in test_event_ids]
+            log.info("Modo teste ativo (TEST_EVENT_IDS) — restrito a %d evento(s): %s", len(events), sorted(test_event_ids))
+        else:
+            events = _filter_eventos_ativos(events)
+
+        stats = _new_stats()
+        status = "ok"
+        try:
+            for event in events:
+                stats["eventos_processados"] += 1
+                process_event(event, stats)
+        except Exception:
+            status = "error"
+            raise
+        finally:
+            logs_repo.insert_execucao("A", iniciado_em, datetime.now(timezone.utc), status, stats)
+
+        return stats
+    finally:
+        release_lock("global")
 
 
 def sync_one_event(event_id: str, force: bool = False) -> dict:

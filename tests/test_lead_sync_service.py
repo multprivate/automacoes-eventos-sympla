@@ -148,3 +148,49 @@ class TestProcessParticipantDispatch:
             {"id": "1", "email": ""}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
         assert result is True  # sem telefone/e-mail/nome batendo -> pulado, mas tratado como sucesso
+
+
+class TestSyncAllUpcomingEventsLock:
+    """A trava 'global' substitui o `concurrency: group: automacao-a` que o
+    GitHub Actions garantia sozinho — sem ela, o Cron Job Render (motor
+    agendado) e o painel (sob demanda) poderiam sobrepor."""
+
+    def test_trava_em_uso_pula_execucao_sem_erro(self, monkeypatch):
+        def _raise(escopo, quem):
+            raise lead_sync_service.SyncLockHeld("já travado")
+
+        monkeypatch.setattr(lead_sync_service, "acquire_lock", _raise)
+        monkeypatch.setattr(
+            lead_sync_service, "list_upcoming_events",
+            lambda: (_ for _ in ()).throw(AssertionError("não deveria nem buscar eventos")),
+        )
+
+        result = lead_sync_service.sync_all_upcoming_events()
+        assert result == lead_sync_service._new_stats()
+
+    def test_adquire_e_libera_a_trava_em_execucao_normal(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "acquire_lock", lambda escopo, quem: calls.append(("acquire", escopo, quem)))
+        monkeypatch.setattr(lead_sync_service, "release_lock", lambda escopo: calls.append(("release", escopo)))
+        monkeypatch.setattr(lead_sync_service, "list_upcoming_events", lambda: [])
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_execucao", lambda *a, **kw: None)
+
+        lead_sync_service.sync_all_upcoming_events()
+
+        assert calls == [("acquire", "global", "cron"), ("release", "global")]
+
+    def test_libera_a_trava_mesmo_se_process_event_falhar(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "acquire_lock", lambda escopo, quem: None)
+        monkeypatch.setattr(lead_sync_service, "release_lock", lambda escopo: calls.append(escopo))
+        monkeypatch.setattr(lead_sync_service, "list_upcoming_events", lambda: [{"id": "e1"}])
+        monkeypatch.setattr(lead_sync_service, "_filter_eventos_ativos", lambda events: events)
+        monkeypatch.setattr(lead_sync_service, "process_event", lambda *a, **kw: (_ for _ in ()).throw(RuntimeError("bitrix fora do ar")))
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_execucao", lambda *a, **kw: None)
+
+        try:
+            lead_sync_service.sync_all_upcoming_events()
+        except RuntimeError:
+            pass
+
+        assert calls == ["global"]
