@@ -1,0 +1,55 @@
+{% extends "base.html" %}
+{% block title %}Eventos{% endblock %}
+{% block content %}
+<h2>Eventos Sincronizados</h2>
+<p class="page-subtitle">Gerencie quais eventos Sympla enviam participantes para o Bitrix24</p>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>Evento</th><th>Data</th><th>Inscritos</th><th>Presentes</th>
+            <th>Último sync</th><th>Status</th><th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for e in eventos %}
+        <tr>
+            <td>{{ e.nome }}<br><code>{{ e.id }}</code></td>
+            <td>{{ e.data }}</td>
+            <td>{{ e.inscritos }}</td>
+            <td>{{ e.presentes }}</td>
+            <td>{{ e.ultimo_sync[:16].replace("T", " ") if e.ultimo_sync else "nunca" }}</td>
+            <td>
+                {% if e.removido %}
+                <span class="badge badge-error">removido</span>
+                {% elif e.ativo %}
+                <span class="badge badge-ok">ativo</span>
+                {% else %}
+                <span class="badge badge-neutral">pausado</span>
+                {% endif %}
+            </td>
+            <td class="actions-cell">
+                <form method="post" action="{{ url_for('eventos.sincronizar', event_id=e.id) }}">
+                    <button type="submit" {{ "disabled" if e.removido else "" }}>Sincronizar agora</button>
+                </form>
+                <form method="post" action="{{ url_for('eventos.forcar', event_id=e.id) }}" onsubmit="return confirm('Forçar atualização de campos em TODOS os inscritos de {{ e.nome }}?');">
+                    <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }}>Forçar campos</button>
+                </form>
+                <form method="post" action="{{ url_for('eventos.toggle', event_id=e.id) }}">
+                    <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }}>{{ "Pausar" if e.ativo else "Ativar" }}</button>
+                </form>
+                {% if not e.removido %}
+                <form method="post" action="{{ url_for('eventos.remover', event_id=e.id) }}" onsubmit="return confirm('Remover {{ e.nome }} da sincronização automática?');">
+                    <button type="submit" class="danger">Remover</button>
+                </form>
+                {% endif %}
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="7">Nenhum evento futuro encontrado na Sympla agora.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}

@@ -1,0 +1,45 @@
+{% extends "base.html" %}
+{% block title %}Logs{% endblock %}
+{% block content %}
+<h2>Log de Sincronização</h2>
+<p class="page-subtitle">Histórico das ações realizadas (nesta página: {{ itens|length }} registro(s))</p>
+
+<div class="grid">
+    <article><p>Sucessos</p><h4>{{ sucessos }}</h4></article>
+    <article><p>Erros</p><h4>{{ erros }}</h4></article>
+    <article><p>Tempo médio</p><h4>{{ tempo_medio_ms }}ms</h4></article>
+</div>
+
+<ul class="subnav">
+    <li><a href="{{ url_for('logs.index') }}" {{ 'aria-current="page"' if tipo_atual == "todas" else "" }}>Todas</a></li>
+    <li><a href="{{ url_for('logs.index', tipo='participante') }}" {{ 'aria-current="page"' if tipo_atual == "participante" else "" }}>Participante</a></li>
+    <li><a href="{{ url_for('logs.index', tipo='evento') }}" {{ 'aria-current="page"' if tipo_atual == "evento" else "" }}>Evento</a></li>
+</ul>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr><th>Data/Hora</th><th>Ação</th><th>Entidade</th><th>Status</th><th>Duração</th><th>Erro</th></tr>
+    </thead>
+    <tbody>
+        {% for i in itens %}
+        <tr>
+            <td>{{ i.criado_em[:19].replace("T", " ") }}</td>
+            <td>{{ i.acao }}</td>
+            <td><code>{{ i.entidade_ref }}</code></td>
+            <td><span class="badge {{ 'badge-ok' if i.status == 'ok' else 'badge-error' }}">{{ i.status }}</span></td>
+            <td>{{ i.duracao_ms }}ms</td>
+            <td>{{ i.erro or "–" }}</td>
+        </tr>
+        {% else %}
+        <tr><td colspan="6">Nenhum registro ainda.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<ul class="pagination">
+    {% if page > 1 %}<li><a href="{{ url_for('logs.index', tipo=request.args.get('tipo'), page=page-1) }}">← Anterior</a></li>{% endif %}
+    <li><a href="{{ url_for('logs.index', tipo=request.args.get('tipo'), page=page+1) }}">Próxima →</a></li>
+</ul>
+{% endblock %}

@@ -14,21 +14,29 @@ Guia pro dia a dia: o que fazer quando precisa mudar alguma coisa, como testar s
 | `BITRIX_FIELD_SYMPLA_EVENT_ID` | Não | A, B | Código do campo com o ID interno do evento Sympla. |
 | `BITRIX_FIELD_ORIGEM` | Não | A | Código do campo "Origem". |
 | `BITRIX_FIELD_PRESENTE_NO_EVENTO` | Não | B | Código do campo "Presente no evento". |
+| `BITRIX_FIELD_FILTRAR_EVENTO` | Não | A | Código do campo "Filtrar Evento" (lista, um item por evento — `"DD/MM/AA - Nome do Evento"`). Aparece como checkbox de múltipla seleção na aba de Filtros da listagem de Leads. |
 | `TEST_EVENT_IDS` | Não | A | Lista de `event_id` (separados por vírgula) pra restringir a Automação A só a esses eventos. Deixe vazio em produção. |
+| `SUPABASE_URL` | Não* | A, painel | URL do projeto Supabase. Sem ela, cupons/mapeamento caem pro fallback fixo no código, e o painel não funciona. |
+| `SUPABASE_SERVICE_KEY` | Não* | A, painel | Chave de serviço do Supabase (acesso via REST/PostgREST). |
+| `ADMIN_PASSWORD` | Sim (painel) | painel | Senha única de acesso ao painel administrativo. |
+| `FLASK_SECRET_KEY` | Sim (painel) | painel | Assina o cookie de sessão do painel — gere um valor aleatório (`python3 -c "import secrets; print(secrets.token_hex(32))"`) e use o MESMO valor em todos os workers/deploys, senão o login não se mantém. |
+
+\* Automação A funciona sem `SUPABASE_URL`/`SUPABASE_SERVICE_KEY` (cai pro fallback fixo), mas o painel administrativo não funciona sem eles.
 
 Se um campo opcional ficar vazio, a automação simplesmente não mexe naquele campo do Lead (não quebra, só ignora).
 
 ## Adicionando um assessor ou variação de cupom
 
-O mapa fica em `automacao_a_inscricoes.py`, na constante `ASSESSOR_POR_CUPOM`. A chave é o texto do cupom em maiúsculas (o mesmo formato que a Sympla manda, tipo `"100.00% - IARA"`), o valor é o e-mail do assessor no Bitrix.
+Pelo painel (recomendado): aba **Cupons**, formulário "+ Novo cupom" — não precisa de deploy nem de editar código.
 
 1. Confirma o e-mail certo do assessor no Bitrix.
-2. Adiciona a linha no dicionário.
-3. Se for uma porcentagem diferente da que já existe pro mesmo assessor (por exemplo já tem `"100.00% - IARA"` e agora precisa de `"70% - IARA"`), adiciona como uma chave nova, não troca a existente.
-4. Testa com `preview_novos_leads.py` antes de confiar (veja a seção de teste abaixo).
-5. Commita e dá push (o próprio usuário faz o push, não peça pro Claude fazer isso).
+2. Preenche cupom (mesmo formato que a Sympla manda, tipo `"100.00% - IARA"`), tipo "Assessor", e o e-mail.
+3. Se for uma porcentagem diferente da que já existe pro mesmo assessor (por exemplo já tem `"100.00% - IARA"` e agora precisa de `"70% - IARA"`), cadastra como um cupom novo, não edita o existente.
+4. Testa com `preview_novos_leads.py` antes de confiar (veja a seção de teste abaixo) — ele já lê o cupom do Supabase.
 
-Cupom de canal, sem assessor específico (o exemplo hoje é tráfego pago), vai no dicionário `ORIGEM_POR_CUPOM_CANAL`, logo abaixo.
+Cupom de canal, sem assessor específico (o exemplo hoje é tráfego pago), usa tipo "Canal de aquisição" no mesmo formulário.
+
+Se o Supabase estiver fora do ar (raro), o mapa cai pros dicts fixos em `domain/coupons.py` (`_DEFAULT_ASSESSOR_POR_CUPOM`/`_DEFAULT_ORIGEM_POR_CUPOM_CANAL`) — editar esses dicts é o caminho de emergência, não o normal.
 
 ## Testando uma mudança sem afetar leads reais
 
@@ -40,7 +48,7 @@ Antes de confiar em qualquer mudança na lógica de matching, criação de Lead 
 python preview_novos_leads.py
 ```
 
-**2. `TEST_EVENT_IDS`**, no `.env` local, restringe a Automação A (a de verdade, com escrita) a um evento específico. O jeito mais seguro de validar uma mudança de ponta a ponta é criar um evento de teste na Sympla (precisa estar publicado, rascunho não aparece pra API), cadastrar 1 ou 2 inscritos de teste nele, pegar o `event_id` interno (não o número que aparece no painel: use `resolve_event_id()` em `common.py` pra converter) e rodar assim:
+**2. `TEST_EVENT_IDS`**, no `.env` local, restringe a Automação A (a de verdade, com escrita) a um evento específico. O jeito mais seguro de validar uma mudança de ponta a ponta é criar um evento de teste na Sympla (precisa estar publicado, rascunho não aparece pra API), cadastrar 1 ou 2 inscritos de teste nele, pegar o `event_id` interno (não o número que aparece no painel do organizador Sympla: use `resolve_event_id()`, de `common`, pra converter) e rodar assim:
 
 ```bash
 # no .env local
@@ -51,9 +59,23 @@ python automacao_a_inscricoes.py
 
 Isso cria/atualiza Leads de verdade, mas só pros participantes desse evento. Depois de validar, limpa o `TEST_EVENT_IDS` do `.env` local (não precisa mexer em nada na produção, essa variável nunca deve ir pro GitHub Secrets).
 
+## O painel administrativo
+
+Um Flask separado (`interface_app.py`, blueprints em `interface/`), rodando como serviço próprio no Render (`sympla-dashboard` no `render.yaml`) — nunca dentro do processo da Automação B. Login por senha única (`ADMIN_PASSWORD`).
+
+- **Dashboard**: visão geral (eventos futuros/sincronizados, última execução).
+- **Eventos**: lista de eventos com contadores, e os botões "Sincronizar agora" (só participantes novos), "Forçar atualização de campos" (reenvia os 4 campos de evento mesmo já iguais, sem forçar estágio), "Remover"/toggle Ativo-Inativo (pausa/exclui o evento da sincronização automática, sem apagar histórico).
+- **Mapeamento**: edita `config_kv` (códigos de campo/estágio do Bitrix).
+- **Cupons**: edita `assessores_cupom`.
+- **Logs**: histórico fino de sincronizações (`execucoes_log_itens`), com duração e erro por evento.
+
+Rodar local: `flask --app interface_app run --port 5002`.
+
 ## Checando a saúde da produção
 
-A Automação A roda no GitHub Actions. Pra ver o histórico de execuções:
+**Pelo painel** (mais direto): aba Logs mostra sucesso/erro por evento sincronizado, e o Dashboard mostra a última execução.
+
+**Pelo GitHub Actions** (enquanto o Cron Job do Render não substituiu o schedule — ver `docs/ARQUITETURA.md`): pra ver o histórico de execuções:
 
 ```bash
 gh run list --workflow=automacao_a.yml --limit 15
@@ -65,7 +87,7 @@ E pra ver o log de uma execução específica:
 gh run view <run_id> --log
 ```
 
-Um log saudável mostra, pra cada evento, quantos inscritos novos apareceram e o que foi feito com cada um (`Lead X atualizado`, `Novo lead X criado`, `Nenhum inscrito novo`). Se aparecer `[ERROR]` ou `Falha ao processar`, vale investigar: o inscrito não foi perdido (o cache só marca sucesso), mas alguma coisa está bloqueando o processamento dele, e vai continuar tentando até resolver.
+Um log saudável mostra, pra cada evento, quantos inscritos novos apareceram e o que foi feito com cada um (`Lead X atualizado`, `Novo lead X criado`, `Nenhum inscrito novo`). Se aparecer `[ERROR]` ou `Falha ao processar`, vale investigar: o inscrito não foi perdido (a tabela de idempotência só marca sucesso), mas alguma coisa está bloqueando o processamento dele, e vai continuar tentando até resolver.
 
 ## Erros comuns e o que fazer
 
@@ -73,7 +95,7 @@ Um log saudável mostra, pra cada evento, quantos inscritos novos apareceram e o
 O webhook de entrada do Bitrix não tem a permissão de usuários. Na tela do webhook (Aplicações → Webhooks → o webhook de entrada), em "Atribuir permissões", adiciona `Usuários (user)` ao lado de `CRM (crm)` e salva.
 
 **`Item 'X' não encontrado na lista do campo Y`**
-O valor não existe como opção no campo enumeration do Bitrix (Origem, Presente no evento). Roda `python setup_custom_fields.py`, ele confere os campos e adiciona os valores que faltarem sem apagar os que já existem.
+O valor não existe como opção no campo enumeration do Bitrix (Origem, Presente no evento). Roda `python setup_custom_fields.py`, ele confere os campos e adiciona os valores que faltarem sem apagar os que já existem. (Filtrar Evento não dá esse erro — ele cria o item sozinho em runtime via `ensure_enum_value`; se der erro é porque o CAMPO em si ainda não existe, aí sim precisa rodar `setup_custom_fields.py` primeiro.)
 
 **Campo não bate / dado indo pro lugar errado**
 Confere se o código do campo no `.env` (ou no secret do GitHub) é o mesmo que está configurado de verdade no Bitrix. Códigos de campo mudam quando alguém recria ou renomeia o campo pela tela, e isso já aconteceu antes.

@@ -1,0 +1,78 @@
+{% extends "base.html" %}
+{% block title %}Mapeamento{% endblock %}
+{% block content %}
+<h2>Mapeamento</h2>
+<p class="page-subtitle">Campos e estágio do Bitrix. Editar aqui vale pra próxima sincronização (o motor cacheia por 60s). Campo em branco não apaga o valor atual — só edite o que quiser trocar de verdade.</p>
+<p><small>"Presente no evento" (Automação B) não aparece aqui — continua configurado direto no serviço da Automação B, sem depender desta tabela.</small></p>
+<form method="post">
+    <div class="table-wrap">
+    <table>
+        <thead>
+            <tr><th>Chave</th><th>Valor efetivo</th><th>Descrição</th></tr>
+        </thead>
+        <tbody>
+            {% for l in linhas %}
+            <tr>
+                <td>
+                    <code>{{ l.chave }}</code>
+                    <input type="hidden" name="chave" value="{{ l.chave }}">
+                </td>
+                <td><input type="text" name="valor_{{ l.chave }}" value="{{ l.valor }}"></td>
+                <td>{{ l.descricao }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+    </div>
+    <button type="submit" style="margin-top:1.25rem">Salvar alterações</button>
+</form>
+
+<h3>Mapeamentos extras de campo</h3>
+<p class="page-subtitle">Vincule um dado que o motor já extrai de cada inscrito (cupom, telefone, nome, e-mail) a qualquer campo do Bitrix — sem precisar pedir ajuste de código pra cada campo novo.</p>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr><th>Origem do dado</th><th>Campo Bitrix</th><th>Aplicar em</th><th></th></tr>
+    </thead>
+    <tbody>
+        {% for m in extras %}
+        <tr>
+            <td>{{ origens_disponiveis.get(m.origem_dado, m.origem_dado) }}</td>
+            <td><code>{{ m.bitrix_field_code }}</code></td>
+            <td><span class="badge {{ 'badge-warning' if m.aplicar_em == 'todos' else 'badge-neutral' }}">{{ "todos os leads" if m.aplicar_em == "todos" else "só leads novos" }}</span></td>
+            <td>
+                <form method="post" action="{{ url_for('mapeamento.extras_remover') }}" onsubmit="return confirm('Remover este mapeamento?');">
+                    <input type="hidden" name="id" value="{{ m.id }}">
+                    <button type="submit" class="danger">Remover</button>
+                </form>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="4">Nenhum mapeamento extra cadastrado ainda.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+
+<h3 style="margin-top:1.75rem">+ Novo mapeamento extra</h3>
+<form method="post" action="{{ url_for('mapeamento.extras_salvar') }}">
+    <label for="origem_dado">Dado do inscrito</label>
+    <select id="origem_dado" name="origem_dado" required>
+        {% for chave, label in origens_disponiveis.items() %}
+        <option value="{{ chave }}">{{ label }}</option>
+        {% endfor %}
+    </select>
+
+    <label for="bitrix_field_code">Código do campo no Bitrix (ex: UF_CRM_...)</label>
+    <input type="text" id="bitrix_field_code" name="bitrix_field_code" required>
+
+    <label for="aplicar_em">Aplicar em</label>
+    <select id="aplicar_em" name="aplicar_em" required>
+        <option value="todos">Todos os leads (novos e atualizados)</option>
+        <option value="novo">Só leads novos</option>
+    </select>
+
+    <button type="submit" style="margin-top:1.25rem">Salvar mapeamento</button>
+</form>
+{% endblock %}

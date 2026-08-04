@@ -13,12 +13,15 @@ Uso:
 
 from common import (
     bitrix_call,
+    format_event_label,
+    get_all_events,
     ORIGEM_VALOR_CUPOM_DESCONTO,
     ORIGEM_VALOR_FORMULARIO,
     ORIGEM_VALOR_INSCRITO_DESCONHECIDO,
     ORIGEM_VALOR_TRAFEGO_PAGO,
     VALOR_PRESENTE,
     VALOR_NAO_PRESENTE,
+    _merge_enum_items,
 )
 
 
@@ -56,18 +59,11 @@ def create_enum_field(field_name: str, label: str, values: list[str]) -> str:
     existing = _find_field_by_name(field_name)
     if existing:
         code = existing["FIELD_NAME"]
-        current_items = existing.get("LIST", [])
-        current_values = {item.get("VALUE") for item in current_items}
-        faltando = [v for v in values if v not in current_values]
+        updated_list, faltando = _merge_enum_items(existing.get("LIST", []), values)
         if not faltando:
             print(f"Campo '{label}' já tem todos os valores necessários: {code}")
             return code
 
-        # crm.lead.userfield.update substitui a LIST inteira, então
-        # reenviamos os itens atuais (com ID, pra preservar) + os novos
-        # (sem ID, pra criar) — nunca apaga opção existente.
-        updated_list = [{"ID": item["ID"], "VALUE": item["VALUE"]} for item in current_items]
-        updated_list += [{"VALUE": v} for v in faltando]
         bitrix_call("crm.lead.userfield.update", {"id": existing["ID"], "fields": {"LIST": updated_list}})
         print(f"Campo '{label}' ({code}) atualizado com os novos valores: {faltando}")
         return code
@@ -81,7 +77,7 @@ def create_enum_field(field_name: str, label: str, values: list[str]) -> str:
                 "EDIT_FORM_LABEL": {"pt": label},
                 "LIST_COLUMN_LABEL": {"pt": label},
                 "LIST_FILTER_LABEL": {"pt": label},
-                "LIST": [{"VALUE": v} for v in values],
+                "LIST": [{"VALUE": v, "SORT": (i + 1) * 10} for i, v in enumerate(values)],
             }
         },
     )
@@ -122,6 +118,17 @@ def main() -> None:
         [ORIGEM_VALOR_FORMULARIO, ORIGEM_VALOR_INSCRITO_DESCONHECIDO, ORIGEM_VALOR_CUPOM_DESCONTO, ORIGEM_VALOR_TRAFEGO_PAGO],
     )
     presente_code = create_enum_field("PRESENTE_NO_EVENTO", "Presente no evento", [VALOR_PRESENTE, VALOR_NAO_PRESENTE])
+
+    # Lista/enumeration com TODOS os eventos (passados e futuros), pra
+    # aparecer como checkbox de múltipla seleção na aba de Filtros da
+    # listagem de Leads. Diferente de ORIGEM/PRESENTE_NO_EVENTO (valores
+    # fixos), essa lista cresce em runtime — automacao_a_inscricoes.py
+    # adiciona um item novo por evento novo via common.ensure_enum_value().
+    # Aqui só pré-populamos com o que já existe, em ordem cronológica.
+    eventos = sorted(get_all_events(), key=lambda e: (e.get("start_date") or ""))
+    labels_evento = [format_event_label(e.get("name", ""), (e.get("start_date") or "")[:10]) for e in eventos]
+    filtrar_evento_code = create_enum_field("FILTRAR_EVENTO", "Filtrar Evento", labels_evento)
+
     stage_code = ensure_lead_stage("Inscrito Pro Evento")
 
     print()
@@ -132,6 +139,7 @@ def main() -> None:
     print(f"BITRIX_FIELD_SYMPLA_EVENT_ID={sympla_event_id_code}")
     print(f"BITRIX_FIELD_ORIGEM={origem_code}")
     print(f"BITRIX_FIELD_PRESENTE_NO_EVENTO={presente_code}")
+    print(f"BITRIX_FIELD_FILTRAR_EVENTO={filtrar_evento_code}")
 
 
 if __name__ == "__main__":
