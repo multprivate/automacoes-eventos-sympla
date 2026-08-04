@@ -18,6 +18,7 @@ from .routes_dashboard import dashboard_bp
 from .routes_eventos import eventos_bp
 from .routes_logs import logs_bp
 from .routes_mapeamento import mapeamento_bp
+from .routes_sync import sync_bp
 
 log = logging.getLogger("interface")
 
@@ -40,5 +41,6 @@ def create_app() -> Flask:
     app.register_blueprint(mapeamento_bp)
     app.register_blueprint(cupons_bp)
     app.register_blueprint(logs_bp)
+    app.register_blueprint(sync_bp)
 
     return app
