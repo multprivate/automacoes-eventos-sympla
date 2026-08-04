@@ -21,20 +21,12 @@ services:
 
   # Painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs) —
   # processo Flask separado, nunca registrado dentro do serviço acima.
-  #
-  # Também hospeda o gatilho de sincronização agendada: em vez de um
-  # Render Cron Job (não tem plano free), um serviço de cron externo
-  # gratuito (cron-job.org) bate em GET /api/sync/trigger?token=... a cada
-  # 10min — mesmo papel que cron-job.org já cumpria batendo em
-  # workflow_dispatch do GitHub Actions, só que agora direto aqui. Timeout
-  # do gunicorn aumentado pra sincronização não ser matada no meio (uma
-  # rodada com muitos inscritos novos pode passar dos 30s default).
   - type: web
     name: sympla-dashboard
     runtime: python
     plan: free
     buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn interface_app:app --bind 0.0.0.0:$PORT --timeout 300
+    startCommand: gunicorn interface_app:app --bind 0.0.0.0:$PORT
     envVars:
       - key: SYMPLA_TOKEN
         sync: false
@@ -60,5 +52,37 @@ services:
         sync: false
       - key: FLASK_SECRET_KEY
         sync: false
-      - key: SYNC_TRIGGER_TOKEN
+
+  # Motor de sincronização (substitui o schedule do GitHub Actions +
+  # cron-job.org) — mesmo formato "sobe, roda, sai" do workflow_dispatch de
+  # hoje, sem o problema de dyno dormindo que um Worker persistente teria.
+  # NOTA: Render Cron Jobs não têm plano free — confirmar o plano antes do
+  # deploy (não decidi isso por você).
+  - type: cron
+    name: automacao-a-sync
+    runtime: python
+    plan: starter
+    schedule: "*/10 * * * *"
+    buildCommand: pip install -r requirements.txt
+    startCommand: python automacao_a_inscricoes.py
+    envVars:
+      - key: SYMPLA_TOKEN
+        sync: false
+      - key: BITRIX_WEBHOOK_URL
+        sync: false
+      - key: BITRIX_STAGE_INSCRITO_PRO_EVENTO
+        sync: false
+      - key: BITRIX_FIELD_DATA_DO_EVENTO
+        sync: false
+      - key: BITRIX_FIELD_NOME_DO_EVENTO
+        sync: false
+      - key: BITRIX_FIELD_SYMPLA_EVENT_ID
+        sync: false
+      - key: BITRIX_FIELD_ORIGEM
+        sync: false
+      - key: BITRIX_FIELD_FILTRAR_EVENTO
+        sync: false
+      - key: SUPABASE_URL
+        sync: false
+      - key: SUPABASE_SERVICE_KEY
         sync: false
