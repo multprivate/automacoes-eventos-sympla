@@ -46,10 +46,11 @@ from common import (
     resolve_user_id_by_email,
     OLD_FUNNEL_STAGES,
 )
+from domain.campo_extra_mapeamento import resolve_extra_fields
 from domain.matching import find_matching_lead_ids as _find_matching_lead_ids
 from domain.stage_rules import build_fields_to_advance
 from repositories import eventos_config_repo, logs_repo, processed_repo
-from services import config_service
+from services import campo_mapeamento_service, config_service
 from services.coupon_service import resolve_assessor_and_origem
 
 log = logging.getLogger("services.lead_sync_service")
@@ -120,9 +121,8 @@ def build_cupom_map_loader(event_id: str):
     return get
 
 
-def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict) -> None:
+def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict]) -> None:
     name = participant_full_name(participant)
-    cupom = extract_discount_code(participant, get_cupom_map)
     assessor_email, origem_valor = resolve_assessor_and_origem(cupom)
 
     fields = {
@@ -145,6 +145,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
         fields["ASSIGNED_BY_ID"] = resolve_user_id_by_email(assessor_email)
     if email:
         fields["EMAIL"] = [{"VALUE": normalize_email(email), "VALUE_TYPE": "WORK"}]
+    fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=None))
 
     new_id = bitrix_call("crm.lead.add", {"fields": fields})
     stats["leads_criados"] += 1
@@ -152,7 +153,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     log.info("Novo lead %s criado pro participante %s (%s) — origem=%s%s.", new_id, participant.get("id"), name, origem_valor, responsavel_info)
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, force: bool = False) -> bool:
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], force: bool = False) -> bool:
     """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
     ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
     errado e precisa ser tentado de novo na próxima execução. Só entra na
@@ -167,6 +168,13 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     phone_key = format_phone_br(phone_raw)
     email = participant.get("email") or ""
     full_name = participant_full_name(participant)
+    cupom = extract_discount_code(participant, get_cupom_map)
+    valores_disponiveis = {
+        "cupom_desconto": cupom,
+        "telefone": phone_key,
+        "nome_completo": full_name,
+        "email": email,
+    }
 
     try:
         lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
@@ -194,6 +202,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                     # mas o estágio nunca muda — mesmo que build_fields_to_advance
                     # mude de regra no futuro.
                     fields.pop("STATUS_ID", None)
+                fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=lead, force=force))
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
@@ -202,7 +211,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
         elif phone_key:
-            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config)
+            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos)
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
         return True
@@ -269,6 +278,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
     log.info("%d inscrito(s) a processar em %s (id interno %s) de %d no total.", len(participants_to_process), event_name, event_id, len(participants))
 
     field_config = _resolve_field_config()
+    extra_mapeamentos = campo_mapeamento_service.load_mapeamentos()
 
     filtrar_evento_id = ""
     if field_config["field_filtrar_evento"]:
@@ -282,7 +292,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
     newly_done = {
         str(participant.get("id"))
         for participant in participants_to_process
-        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, force=force)
+        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, force=force)
     }
 
     if not newly_done:

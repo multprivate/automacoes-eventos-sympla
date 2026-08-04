@@ -2,24 +2,29 @@
 {% block title %}Dashboard{% endblock %}
 {% block content %}
 <h2>Dashboard</h2>
-<p>Visão geral da sincronização Sympla ↔ Bitrix24</p>
+<p class="page-subtitle">Visão geral da sincronização Sympla ↔ Bitrix24</p>
 
 <div class="grid">
     <article>
-        <p><small>Eventos sincronizados</small></p>
+        <p>Eventos sincronizados</p>
         <h3>{{ total_sincronizados }} <small>de {{ total_disponiveis }} futuros</small></h3>
     </article>
     <article>
-        <p><small>Última sincronização</small></p>
-        <h3>{{ ultima_execucao.finalizado_em if ultima_execucao else "—" }}</h3>
-        {% if ultima_execucao %}<small>status: {{ ultima_execucao.status }}</small>{% endif %}
+        <p>Última sincronização</p>
+        {% if ultima_execucao %}
+        <h3>{{ ultima_execucao.finalizado_em[:16].replace("T", " ") }}</h3>
+        <span class="badge {{ 'badge-ok' if ultima_execucao.status == 'ok' else 'badge-error' }}">{{ ultima_execucao.status }}</span>
+        {% else %}
+        <h3>—</h3>
+        {% endif %}
     </article>
 </div>
 
 <h3>Eventos</h3>
+<div class="table-wrap">
 <table>
     <thead>
-        <tr><th>Evento</th><th>Data</th><th>Inscritos</th><th>Presentes</th><th>Último sync</th><th>Ativo</th></tr>
+        <tr><th>Evento</th><th>Data</th><th>Inscritos</th><th>Presentes</th><th>Último sync</th><th>Status</th></tr>
     </thead>
     <tbody>
         {% for e in eventos %}
@@ -28,13 +33,14 @@
             <td>{{ e.data }}</td>
             <td>{{ e.inscritos }}</td>
             <td>{{ e.presentes }}</td>
-            <td>{{ e.ultimo_sync or "nunca" }}</td>
-            <td>{{ "✅" if e.ativo else "⏸️" }}</td>
+            <td>{{ e.ultimo_sync[:16].replace("T", " ") if e.ultimo_sync else "nunca" }}</td>
+            <td><span class="badge {{ 'badge-ok' if e.ativo else 'badge-neutral' }}">{{ "ativo" if e.ativo else "pausado" }}</span></td>
         </tr>
         {% else %}
         <tr><td colspan="6">Nenhum evento futuro encontrado na Sympla agora.</td></tr>
         {% endfor %}
     </tbody>
 </table>
-<p><a href="{{ url_for('eventos.index') }}">Ver aba Eventos para sincronizar/pausar/remover →</a></p>
+</div>
+<p style="margin-top:1.25rem"><a href="{{ url_for('eventos.index') }}">Ver aba Eventos para sincronizar/pausar/remover →</a></p>
 {% endblock %}

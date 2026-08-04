@@ -1,9 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Login{% endblock %}
 {% block content %}
-<article style="max-width: 400px; margin: 4rem auto;">
-    <h2>Entrar</h2>
-    {% if erro %}<p style="color: #c0392b;">{{ erro }}</p>{% endif %}
+<article class="login-card">
+    <h2>Eventos Sympla</h2>
+    {% if erro %}<p class="flash flash-erro">{{ erro }}</p>{% endif %}
     <form method="post">
         <label for="senha">Senha</label>
         <input type="password" id="senha" name="senha" required autofocus>

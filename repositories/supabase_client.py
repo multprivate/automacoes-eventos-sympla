@@ -43,6 +43,17 @@ def select(table: str, params: dict | None = None) -> list[dict]:
     return resp.json()
 
 
+def insert(table: str, row: dict) -> dict:
+    """Insere uma linha nova (sem upsert/merge) e propaga erro — pra
+    tabelas com PK gerada automaticamente (ex: uuid default), onde não
+    existe uma coluna natural pra resolver conflito."""
+    url, headers = _base_url_and_headers()
+    headers = {**headers, "Content-Type": "application/json", "Prefer": "return=representation"}
+    resp = requests.post(f"{url}/rest/v1/{table}", headers=headers, json=row, timeout=10)
+    resp.raise_for_status()
+    return resp.json()[0]
+
+
 def upsert(table: str, rows: list[dict], on_conflict: str) -> list[dict]:
     """Insere ou atualiza (merge pela coluna em on_conflict). Propaga erro
     — diferente de select(), uma falha aqui precisa ser visível pra quem

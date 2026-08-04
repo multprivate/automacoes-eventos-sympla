@@ -2,7 +2,9 @@
 {% block title %}Cupons{% endblock %}
 {% block content %}
 <h2>Cupons</h2>
-<p>Vincule cupons do Sympla a assessores do Bitrix24. Vale só pra Lead <strong>novo</strong> (criado depois da inscrição) — nunca sobrescreve responsável ou origem de um Lead que já existia.</p>
+<p class="page-subtitle">Vincule cupons do Sympla a assessores do Bitrix24. Vale só pra Lead <strong>novo</strong> (criado depois da inscrição) — nunca sobrescreve responsável ou origem de um Lead que já existia.</p>
+
+<div class="table-wrap">
 <table>
     <thead>
         <tr><th>Cupom</th><th>Tipo</th><th>Assessor</th><th>Canal</th><th></th></tr>
@@ -11,13 +13,13 @@
         {% for c in cupons %}
         <tr>
             <td><code>{{ c.cupom }}</code></td>
-            <td>{{ c.tipo }}</td>
-            <td>{{ c.email_assessor or "-" }}</td>
-            <td>{{ c.origem_canal or "-" }}</td>
+            <td><span class="badge {{ 'badge-neutral' if c.tipo == 'assessor' else 'badge-warning' }}">{{ c.tipo }}</span></td>
+            <td>{{ c.email_assessor or "–" }}</td>
+            <td>{{ c.origem_canal or "–" }}</td>
             <td>
-                <form method="post" action="{{ url_for('cupons.remover') }}" onsubmit="return confirm('Remover o cupom {{ c.cupom }}?');" style="display:inline">
+                <form method="post" action="{{ url_for('cupons.remover') }}" onsubmit="return confirm('Remover o cupom {{ c.cupom }}?');">
                     <input type="hidden" name="cupom" value="{{ c.cupom }}">
-                    <button type="submit" class="secondary">Excluir</button>
+                    <button type="submit" class="danger">Excluir</button>
                 </form>
             </td>
         </tr>
@@ -26,6 +28,7 @@
         {% endfor %}
     </tbody>
 </table>
+</div>
 
 <h3>+ Novo cupom</h3>
 <form method="post" action="{{ url_for('cupons.salvar') }}">
@@ -44,6 +47,6 @@
     <label for="origem_canal">Texto da Origem (se tipo = Canal, ex: "Trafego Pago")</label>
     <input type="text" id="origem_canal" name="origem_canal">
 
-    <button type="submit">Salvar</button>
+    <button type="submit" style="margin-top:1.25rem">Salvar</button>
 </form>
 {% endblock %}

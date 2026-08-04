@@ -4,29 +4,27 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>{% block title %}Painel{% endblock %} · Eventos Sympla</title>
-    <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/@picocss/pico@2/css/pico.min.css">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     <script src="https://unpkg.com/htmx.org@1.9.12"></script>
 </head>
 <body>
     <main class="container">
         {% if session.get('admin_logado') %}
-        <nav>
+        <nav class="topbar">
+            <span class="brand">Eventos Sympla</span>
             <ul>
-                <li><strong>Eventos Sympla</strong></li>
-            </ul>
-            <ul>
-                <li><a href="{{ url_for('dashboard.index') }}">Dashboard</a></li>
-                <li><a href="{{ url_for('eventos.index') }}">Eventos</a></li>
-                <li><a href="{{ url_for('mapeamento.index') }}">Mapeamento</a></li>
-                <li><a href="{{ url_for('cupons.index') }}">Cupons</a></li>
-                <li><a href="{{ url_for('logs.index') }}">Logs</a></li>
+                <li><a href="{{ url_for('dashboard.index') }}" class="{{ 'active' if request.endpoint == 'dashboard.index' else '' }}">Dashboard</a></li>
+                <li><a href="{{ url_for('eventos.index') }}" class="{{ 'active' if request.blueprint == 'eventos' else '' }}">Eventos</a></li>
+                <li><a href="{{ url_for('mapeamento.index') }}" class="{{ 'active' if request.blueprint == 'mapeamento' else '' }}">Mapeamento</a></li>
+                <li><a href="{{ url_for('cupons.index') }}" class="{{ 'active' if request.blueprint == 'cupons' else '' }}">Cupons</a></li>
+                <li><a href="{{ url_for('logs.index') }}" class="{{ 'active' if request.blueprint == 'logs' else '' }}">Logs</a></li>
                 <li><a href="{{ url_for('auth.logout') }}">Sair</a></li>
             </ul>
         </nav>
         {% endif %}
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% for categoria, mensagem in messages %}
-            <p style="{{ 'color: #c0392b;' if categoria == 'erro' else 'color: #27ae60;' }}">{{ mensagem }}</p>
+            <p class="flash flash-{{ categoria }}">{{ mensagem }}</p>
             {% endfor %}
         {% endwith %}
         {% block content %}{% endblock %}
