@@ -53,36 +53,10 @@ services:
       - key: FLASK_SECRET_KEY
         sync: false
 
-  # Motor de sincronização (substitui o schedule do GitHub Actions +
-  # cron-job.org) — mesmo formato "sobe, roda, sai" do workflow_dispatch de
-  # hoje, sem o problema de dyno dormindo que um Worker persistente teria.
-  # NOTA: Render Cron Jobs não têm plano free — confirmar o plano antes do
-  # deploy (não decidi isso por você).
-  - type: cron
-    name: automacao-a-sync
-    runtime: python
-    plan: starter
-    schedule: "*/10 * * * *"
-    buildCommand: pip install -r requirements.txt
-    startCommand: python automacao_a_inscricoes.py
-    envVars:
-      - key: SYMPLA_TOKEN
-        sync: false
-      - key: BITRIX_WEBHOOK_URL
-        sync: false
-      - key: BITRIX_STAGE_INSCRITO_PRO_EVENTO
-        sync: false
-      - key: BITRIX_FIELD_DATA_DO_EVENTO
-        sync: false
-      - key: BITRIX_FIELD_NOME_DO_EVENTO
-        sync: false
-      - key: BITRIX_FIELD_SYMPLA_EVENT_ID
-        sync: false
-      - key: BITRIX_FIELD_ORIGEM
-        sync: false
-      - key: BITRIX_FIELD_FILTRAR_EVENTO
-        sync: false
-      - key: SUPABASE_URL
-        sync: false
-      - key: SUPABASE_SERVICE_KEY
-        sync: false
+  # O motor de sincronização (services/lead_sync_service.py) roda no
+  # GitHub Actions (.github/workflows/automacao_a.yml), disparado por um
+  # serviço de cron externo gratuito (cron-job.org) chamando a API
+  # workflow_dispatch — não no Render. Os runners do GH têm bem mais RAM
+  # que o plano free do Render (512MB), o que importa porque rodar
+  # sync_all_upcoming_events() dentro do processo do painel já causou
+  # OOM em produção quando testado como endpoint HTTP aqui.
