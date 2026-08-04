@@ -103,8 +103,10 @@ Confere se o código do campo no `.env` (ou no secret do GitHub) é o mesmo que 
 **`400 Bad Request` em `crm.lead.userfield.add`**
 Provavelmente já existe um campo com esse `FIELD_NAME`, e o script tentou criar de novo. Acontece quando o campo foi criado manualmente com um código fora do padrão que os scripts esperam. Confere na tela de Campos Personalizados do Bitrix se não ficou um campo duplicado.
 
-## Automação B no Render
+## Serviços no Render
 
-O plano free do Render dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). Por isso tem um serviço externo de ping (cron-job.org ou parecido) batendo em `/health` a cada 10 minutos, só pra manter o serviço acordado. Se a Automação B começar a demorar muito pra responder ou a regra de automação do Bitrix começar a dar timeout, o primeiro lugar pra olhar é se esse ping externo ainda está ativo.
+O plano free do Render dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). Os dois serviços web (`automacao-b-presenca` e `sympla-dashboard`) têm cada um seu próprio `/health` (público, sem login, só confirma que o processo está de pé) — e cada um precisa do seu próprio ping externo (cron-job.org ou parecido) batendo nele a cada 10 minutos pra não dormir. São dois jobs de cron separados, um por serviço; manter um dos dois vivo não mantém o outro acordado.
+
+Se a Automação B começar a demorar muito pra responder ou a regra de automação do Bitrix começar a dar timeout, o primeiro lugar pra olhar é se o ping externo dela ainda está ativo. Mesma lógica pro painel: se o Dashboard/Logs demorar ~30-50s pra carregar na primeira visita do dia, é o cold start do free tier — confere se o ping em `/health` do `sympla-dashboard` está configurado e rodando.
 
 Deploy é automático: qualquer push na branch conectada ao Render dispara um novo deploy.

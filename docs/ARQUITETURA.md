@@ -68,6 +68,8 @@ Pra adicionar assessor ou variação de cupom nova, o jeito mais simples é pela
 
 Tem uma pegadinha aqui: `UC_TJ9FPC` ("Reunião") não segue o padrão de nome dos estágios novos (não tem o prefixo `[NEW]`), mas é funil novo mesmo assim. Se o funil mudar de novo no futuro, vale conferir cada estágio na tela do Bitrix antes de simplesmente confiar no prefixo do nome.
 
+**Nenhum desses dois modelos vai até "Pós Evento".** Esse estágio (e o que acontece nele — marcar presença) fica inteiramente fora deste repositório: é uma automação nativa do Bitrix (robô/regra de funil configurada na própria tela do Bitrix) que move o Lead pra lá, em algum momento depois do evento. É a ENTRADA nesse estágio que dispara o `/webhook/pos-evento` da Automação B (ver docstring de `automacao_b_presenca.py`), não o contrário — nenhum script daqui decide quando isso acontece. Na prática isso significa que um Lead pode passar horas ou dias em "Inscrito Pro Evento" sem o campo "Presente no Evento" nunca aparecer preenchido, e isso não é bug: é só que o robô do Bitrix ainda não moveu ele pra "Pós Evento".
+
 ## A tabela que evita reprocessar todo mundo
 
 A cada execução, seria caro (e desnecessário) reprocessar todos os inscritos de todos os eventos de novo. A tabela `participantes_processados` (Supabase) guarda, por evento, quais IDs de participante já foram tratados com sucesso — substituiu o antigo arquivo `.cache/sympla_processed.json` (que só funcionava bem enquanto havia um único orquestrador rodando via GitHub Actions; com o painel também podendo disparar sincronização sob demanda, o estado precisa ser compartilhado entre os dois).

@@ -27,6 +27,7 @@ services:
     plan: free
     buildCommand: pip install -r requirements.txt
     startCommand: gunicorn interface_app:app --bind 0.0.0.0:$PORT
+    healthCheckPath: /health
     envVars:
       - key: SYMPLA_TOKEN
         sync: false
