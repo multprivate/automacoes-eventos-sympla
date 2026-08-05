@@ -25,6 +25,7 @@ from common import (
     format_phone_br,
     get_lead,
     get_sympla_all_participants,
+    normalize_email,
     normalize_name,
     participant_full_name,
     resolve_enum_id,
@@ -45,14 +46,23 @@ def lead_phone(lead: dict) -> str:
     return format_phone_br(phones[0].get("VALUE", "")) if phones else ""
 
 
-def find_matching_participant(sympla_event_id: str, phone_key: str, name_key: str) -> dict | None:
-    """Acha o participante por telefone ou nome, independente de ter
-    feito check-in ou não — quem decide o que fazer com o check-in é
-    process_lead."""
+def lead_email(lead: dict) -> str:
+    emails = lead.get("EMAIL") or []
+    return normalize_email(emails[0].get("VALUE", "")) if emails else ""
+
+
+def find_matching_participant(sympla_event_id: str, phone_key: str, name_key: str, email_key: str) -> dict | None:
+    """Acha o participante por telefone, nome ou e-mail, independente de
+    ter feito check-in ou não — quem decide o que fazer com o check-in é
+    process_lead. E-mail entrou porque alguns Leads só foram casados pela
+    Automação A por e-mail (telefone do Bitrix não bate com o da Sympla,
+    ou vazio) — sem esse critério aqui, esses ficavam sempre "não
+    encontrado", mesmo com o inscrito certinho na lista."""
     for participant in get_sympla_all_participants(sympla_event_id):
         phone_match = phone_key and format_phone_br(extract_phone(participant)) == phone_key
         name_match = name_key and normalize_name(participant_full_name(participant)) == name_key
-        if phone_match or name_match:
+        email_match = email_key and normalize_email(participant.get("email") or "") == email_key
+        if phone_match or name_match or email_match:
             return participant
     return None
 
@@ -66,8 +76,9 @@ def process_lead(lead_id: str) -> dict:
 
     phone_key = lead_phone(lead)
     name_key = normalize_name(lead.get("NAME", ""))
+    email_key = lead_email(lead)
 
-    participant = find_matching_participant(sympla_event_id, phone_key, name_key)
+    participant = find_matching_participant(sympla_event_id, phone_key, name_key, email_key)
     if not participant:
         return {"status": "not_found", "reason": "participante não encontrado na lista de inscritos do evento"}
 
