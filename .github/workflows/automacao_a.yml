@@ -4,7 +4,7 @@ on:
   # Backstop: o schedule nativo do GitHub Actions é deprioritizado sob carga
   # da plataforma e na prática dispara a cada poucas horas, não a cada 30min
   # (ver docs/ARQUITETURA.md). O disparo confiável de verdade é externo, via
-  # cron-job.org chamando a API workflow_dispatch a cada 10min — isso não
+  # cron-job.org chamando a API workflow_dispatch a cada 30min — isso não
   # sofre a mesma deprioritização. Este schedule só existe como rede de
   # segurança caso o disparo externo falhe (PAT expirado, cron-job.org fora
   # do ar).
