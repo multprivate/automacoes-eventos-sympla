@@ -33,22 +33,22 @@
                 <div class="actions-row">
                     {% if e.sincronizavel %}
                     <form method="post" action="{{ url_for('eventos.sincronizar', event_id=e.id) }}">
-                        <button type="submit" {{ "disabled" if e.removido else "" }}>Sincronizar agora</button>
+                        <button type="submit" {{ "disabled" if e.removido else "" }} title="Processa só os inscritos novos desde a última sincronização.">Sincronizar agora</button>
                     </form>
                     <form method="post" action="{{ url_for('eventos.forcar', event_id=e.id) }}" onsubmit="return confirm('Forçar atualização de campos em TODOS os inscritos de {{ e.nome }}?');">
-                        <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }}>Forçar campos</button>
+                        <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }} title="Reprocessa TODOS os inscritos, reenviando os campos mesmo que já estejam certos.">Forçar campos</button>
                     </form>
                     {% else %}
-                    <span class="badge badge-neutral" title="Evento já passou — não pode ser sincronizado por aqui.">evento passado</span>
+                    <span class="badge badge-neutral" title="Evento já passou — a Sympla não retorna mais ele como 'próximo', então não dá pra sincronizar por aqui (só via script manual).">evento passado</span>
                     {% endif %}
                 </div>
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('eventos.toggle', event_id=e.id) }}">
-                        <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }}>{{ "Pausar" if e.ativo else "Ativar" }}</button>
+                        <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }} title="{{ 'Tira este evento da sincronização automática (o cron passa a ignorá-lo) — os botões manuais continuam funcionando.' if e.ativo else 'Volta a incluir este evento na sincronização automática.' }}">{{ "Pausar" if e.ativo else "Ativar" }}</button>
                     </form>
                     {% if not e.removido %}
                     <form method="post" action="{{ url_for('eventos.remover', event_id=e.id) }}" onsubmit="return confirm('Remover {{ e.nome }} da sincronização automática?');">
-                        <button type="submit" class="danger">Remover</button>
+                        <button type="submit" class="danger" title="Remove o evento da gestão automática de vez (não desfaz). Os dados já sincronizados continuam no Bitrix.">Remover</button>
                     </form>
                     {% endif %}
                 </div>
