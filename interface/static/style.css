@@ -193,15 +193,19 @@ button { background: var(--color-primary); color: #fff; }
 button:hover { background: var(--color-primary-hover); }
 button.secondary { background: var(--color-surface); color: var(--color-text); border-color: var(--color-border); }
 button.secondary:hover { background: var(--color-neutral-bg); }
-button.contrast { background: var(--color-text); color: var(--color-bg); }
-button.contrast:hover { opacity: .85; }
-button.danger { background: var(--color-danger-bg); color: var(--color-danger); }
-button.danger:hover { opacity: .8; }
+button.contrast { background: transparent; color: var(--color-accent); border-color: var(--color-accent); }
+button.contrast:hover { background: var(--color-accent); color: #fff; }
+button.danger { background: var(--color-surface); color: var(--color-danger); border-color: var(--color-danger); }
+button.danger:hover { background: var(--color-danger-bg); }
 button:disabled { opacity: .35; cursor: not-allowed; }
 button:disabled:active { transform: none; }
 
-.actions-cell { display: flex; flex-wrap: wrap; gap: .4rem; }
+/* Célula de ações com várias linhas (ex: aba Eventos) — botões menores que
+   os de página inteira, agrupados em linhas pra não empilhar sem ordem. */
+.actions-cell { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
 .actions-cell form { margin: 0; display: inline; }
+.actions-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
+.actions-cell button { padding: .35rem .7rem; font-size: .78rem; }
 
 /* Forms --------------------------------------------------------------------*/
 label { display: block; font-size: .84rem; font-weight: 600; margin: 1.1rem 0 .35rem; }
