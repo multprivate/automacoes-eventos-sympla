@@ -13,6 +13,7 @@ import secrets
 from flask import Flask
 
 from .auth import auth_bp
+from .filters import to_brt
 from .routes_cupons import cupons_bp
 from .routes_dashboard import dashboard_bp
 from .routes_eventos import eventos_bp
@@ -34,6 +35,7 @@ def create_app() -> Flask:
         )
         secret_key = secrets.token_hex(32)
     app.secret_key = secret_key
+    app.jinja_env.filters["brt"] = to_brt
 
     app.register_blueprint(auth_bp)
     app.register_blueprint(dashboard_bp)

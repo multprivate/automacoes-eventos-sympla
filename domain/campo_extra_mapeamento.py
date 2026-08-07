@@ -15,6 +15,7 @@ ORIGENS_DISPONIVEIS = {
     "telefone": "Telefone formatado (+55DDDNUMERO)",
     "nome_completo": "Nome completo do participante",
     "email": "E-mail do participante",
+    "cpf": "CPF do participante",
 }
 
 

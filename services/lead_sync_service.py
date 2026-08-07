@@ -29,6 +29,7 @@ from common import (
     bitrix_list_all,
     build_cupom_by_order_id,
     ensure_enum_value,
+    extract_cpf,
     extract_discount_code,
     find_contact_ids_by_email,
     find_contact_ids_by_phone,
@@ -327,6 +328,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
         "telefone": phone_key,
         "nome_completo": full_name,
         "email": email,
+        "cpf": extract_cpf(participant),
     }
 
     try:

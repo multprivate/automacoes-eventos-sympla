@@ -1,5 +1,6 @@
 from common.normalization import (
     build_cupom_by_order_id,
+    extract_cpf,
     extract_discount_code,
     extract_phone,
     format_event_label,
@@ -59,6 +60,20 @@ class TestExtractPhone:
     def test_sem_campo_de_telefone(self):
         participant = {"custom_form": [{"name": "Empresa", "value": "Acme"}]}
         assert extract_phone(participant) == ""
+
+
+class TestExtractCpf:
+    def test_encontra_por_pergunta_cpf(self):
+        participant = {"custom_form": [{"name": "CPF", "value": "057.077.113-76"}]}
+        assert extract_cpf(participant) == "057.077.113-76"
+
+    def test_encontra_por_pergunta_qual_seu_cpf(self):
+        participant = {"custom_form": [{"name": "Qual seu CPF?", "value": "111.222.333-44"}]}
+        assert extract_cpf(participant) == "111.222.333-44"
+
+    def test_sem_campo_de_cpf(self):
+        participant = {"custom_form": [{"name": "Telefone", "value": "85999998888"}]}
+        assert extract_cpf(participant) == ""
 
     def test_sem_custom_form(self):
         assert extract_phone({}) == ""

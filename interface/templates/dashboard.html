@@ -7,12 +7,12 @@
 <div class="grid">
     <article>
         <p>Eventos sincronizados</p>
-        <h3>{{ total_sincronizados }} <small>de {{ total_disponiveis }} futuros</small></h3>
+        <h3>{{ total_sincronizados }} <small>de {{ total_disponiveis }}</small></h3>
     </article>
     <article>
         <p>Última sincronização</p>
         {% if ultima_execucao %}
-        <h3>{{ ultima_execucao.finalizado_em[:16].replace("T", " ") }}</h3>
+        <h3>{{ ultima_execucao.finalizado_em | brt }}</h3>
         <span class="badge {{ 'badge-ok' if ultima_execucao.status == 'ok' else 'badge-error' }}">{{ ultima_execucao.status }}</span>
         {% else %}
         <h3>—</h3>
@@ -33,11 +33,11 @@
             <td>{{ e.data }}</td>
             <td>{{ e.inscritos }}</td>
             <td>{{ e.presentes }}</td>
-            <td>{{ e.ultimo_sync[:16].replace("T", " ") if e.ultimo_sync else "nunca" }}</td>
+            <td>{{ e.ultimo_sync | brt if e.ultimo_sync else "nunca" }}</td>
             <td><span class="badge {{ 'badge-ok' if e.ativo else 'badge-neutral' }}">{{ "ativo" if e.ativo else "pausado" }}</span></td>
         </tr>
         {% else %}
-        <tr><td colspan="6">Nenhum evento futuro encontrado na Sympla agora.</td></tr>
+        <tr><td colspan="6">Nenhum evento encontrado.</td></tr>
         {% endfor %}
     </tbody>
 </table>

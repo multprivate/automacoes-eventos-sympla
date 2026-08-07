@@ -1,19 +1,20 @@
 """
-Aba Eventos: junta eventos futuros da Sympla com eventos_config
-(contadores, ativo/removido) e expõe as 3 ações — Sincronizar agora,
-Forçar atualização de campos, Remover — mais o toggle Ativo/Inativo.
+Aba Eventos: junta todo evento já sincronizado (passado ou futuro) com
+eventos_config (contadores, ativo/removido) e expõe as 3 ações —
+Sincronizar agora, Forçar atualização de campos, Remover — mais o toggle
+Ativo/Inativo.
 """
 
 import logging
 
 from flask import Blueprint, flash, redirect, render_template, url_for
 
-from common import list_upcoming_events
 from repositories import eventos_config_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
 from services.lead_sync_service import sync_one_event
 
 from .auth import login_required
+from .eventos_helper import list_all_events_view
 
 log = logging.getLogger("interface.eventos")
 
@@ -28,32 +29,10 @@ def _config_by_id() -> dict[str, dict]:
         return {}
 
 
-def _eventos_view() -> list[dict]:
-    events = list_upcoming_events()
-    config_by_id = _config_by_id()
-
-    view = []
-    for event in events:
-        row = config_by_id.get(event["id"], {})
-        view.append(
-            {
-                "id": event["id"],
-                "nome": event.get("name", ""),
-                "data": (event.get("start_date") or "")[:10],
-                "inscritos": row.get("inscritos_count", 0),
-                "presentes": row.get("presentes_count", 0),
-                "ultimo_sync": row.get("ultimo_sync_em"),
-                "ativo": row.get("ativo", True),
-                "removido": bool(row.get("removido_em")),
-            }
-        )
-    return view
-
-
 @eventos_bp.route("/")
 @login_required
 def index():
-    return render_template("eventos.html", eventos=_eventos_view())
+    return render_template("eventos.html", eventos=list_all_events_view())
 
 
 def _run_sync(event_id: str, force: bool) -> None:
