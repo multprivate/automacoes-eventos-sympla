@@ -33,6 +33,15 @@ FIELD_ORIGEM = os.environ.get("BITRIX_FIELD_ORIGEM", "")
 FIELD_PRESENTE_NO_EVENTO = os.environ.get("BITRIX_FIELD_PRESENTE_NO_EVENTO", "")
 FIELD_FILTRAR_EVENTO = os.environ.get("BITRIX_FIELD_FILTRAR_EVENTO", "")
 
+# "Cliente convidado para" — campo de MÚLTIPLA escolha (MULTIPLE=Y, confirmado
+# via crm.lead.userfield.list), diferente de PARENT_ID_1112: aceita acumular
+# vários eventos ao mesmo tempo, então o motor pode ir somando sem perder o
+# que já estava marcado. O assessor usa isso pra saber pra quais eventos
+# futuros aquele Lead já foi convidado. Default já é o código real em
+# produção (confirmado com o usuário), funciona sem precisar configurar nada
+# a mais no .env.
+FIELD_CLIENTE_CONVIDADO_PARA = os.environ.get("BITRIX_FIELD_CLIENTE_CONVIDADO_PARA", "UF_CRM_1785173622")
+
 # SPA nativa "Eventos Sympla" do Bitrix (Fase 4) — entityTypeId 1112,
 # criada por um app terceiro (Zopu, já descontinuado) antes deste projeto.
 # O prefixo numérico dos campos (36) é o `id` do tipo em crm.type.list, não

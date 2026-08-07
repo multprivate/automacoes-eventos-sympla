@@ -32,6 +32,7 @@ _DESCRICOES = {
     "FIELD_SYMPLA_EVENT_ID": "Código do campo customizado com o ID interno do evento Sympla",
     "FIELD_ORIGEM": 'Código do campo customizado "Origem"',
     "FIELD_FILTRAR_EVENTO": 'Código do campo customizado "Filtrar Evento"',
+    "FIELD_CLIENTE_CONVIDADO_PARA": 'Código do campo customizado "Cliente convidado para" (múltipla escolha)',
     "STAGE_INSCRITO_PRO_EVENTO": 'Código do estágio "Inscrito Pro Evento" no funil de Leads',
 }
 

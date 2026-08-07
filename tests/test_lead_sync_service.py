@@ -54,7 +54,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {"field_cliente_convidado_para": ""}, "", {}, [], item_id=28, force=False,
         )
 
         assert any(m == "create_lead" for m, _ in calls)
@@ -72,7 +72,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {"field_cliente_convidado_para": ""}, "", {}, [], item_id=28, force=False,
         )
 
         lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
@@ -90,7 +90,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {"field_cliente_convidado_para": ""}, "", {}, [], item_id=28, force=False,
         )
 
         assert not any(method == "crm.contact.update" for method, _ in calls)
@@ -107,7 +107,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [25216, 538], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {"field_cliente_convidado_para": ""}, "", {}, [], item_id=28, force=False,
         )
 
         # só processa o de menor ID (538), não cria um Lead pra cada Contato
@@ -132,7 +132,7 @@ class TestProcessParticipantDispatch:
         )
 
         stats = STATS()
-        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_origem": "", "stage_alvo": ""}
+        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_cliente_convidado_para": "", "field_origem": "", "stage_alvo": ""}
         result = lead_sync_service.process_participant(
             {"id": "1", "email": "a@b.com"}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
@@ -143,7 +143,7 @@ class TestProcessParticipantDispatch:
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda *a, **kw: ([], None))
 
         stats = STATS()
-        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_origem": "", "stage_alvo": ""}
+        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_cliente_convidado_para": "", "field_origem": "", "stage_alvo": ""}
         result = lead_sync_service.process_participant(
             {"id": "1", "email": ""}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
@@ -194,3 +194,56 @@ class TestSyncAllUpcomingEventsLock:
             pass
 
         assert calls == ["global"]
+
+
+class TestMergedConvidadoPara:
+    def test_acrescenta_valor_novo_sem_apagar_os_que_ja_tinha(self):
+        lead = {"UF_CONVIDADO": ["10", "20"]}
+        resultado = lead_sync_service._merged_convidado_para(lead, "UF_CONVIDADO", "30")
+        assert resultado == ["10", "20", "30"]
+
+    def test_retorna_none_se_valor_ja_esta_na_lista(self):
+        lead = {"UF_CONVIDADO": ["10", "20"]}
+        assert lead_sync_service._merged_convidado_para(lead, "UF_CONVIDADO", "20") is None
+
+    def test_campo_vazio_vira_lista_com_o_valor_novo(self):
+        lead = {}
+        resultado = lead_sync_service._merged_convidado_para(lead, "UF_CONVIDADO", "10")
+        assert resultado == ["10"]
+
+
+class TestConvidadoParaNoFluxoDeCliente:
+    def test_lead_aberto_ganha_convidado_para_acumulado(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "UF_CONVIDADO": ["10"]})
+        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo")))
+
+        stats = STATS()
+        field_config = {"field_cliente_convidado_para": "UF_CONVIDADO"}
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, field_config, "", {}, [], item_id=None, force=False, convidado_para_id="20",
+        )
+
+        lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert lead_update_calls[0]["fields"]["UF_CONVIDADO"] == ["10", "20"]
+
+    def test_nao_reenvia_se_ja_tem_o_valor(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "UF_CONVIDADO": ["20"]})
+        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo")))
+
+        stats = STATS()
+        field_config = {"field_cliente_convidado_para": "UF_CONVIDADO"}
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, field_config, "", {}, [], item_id=None, force=False, convidado_para_id="20",
+        )
+
+        lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
+        assert lead_update_calls == []

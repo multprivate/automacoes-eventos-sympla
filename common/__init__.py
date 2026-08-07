@@ -32,6 +32,7 @@ from .bitrix_spa_client import (
 from .constants import (
     BITRIX_SPA_ENTITY_TYPE_ID,
     BITRIX_WEBHOOK_URL,
+    FIELD_CLIENTE_CONVIDADO_PARA,
     FIELD_DATA_DO_EVENTO,
     FIELD_FILTRAR_EVENTO,
     FIELD_NOME_DO_EVENTO,
@@ -95,6 +96,7 @@ __all__ = [
     "_merge_enum_items",
     "BITRIX_SPA_ENTITY_TYPE_ID",
     "BITRIX_WEBHOOK_URL",
+    "FIELD_CLIENTE_CONVIDADO_PARA",
     "FIELD_DATA_DO_EVENTO",
     "FIELD_FILTRAR_EVENTO",
     "FIELD_NOME_DO_EVENTO",
