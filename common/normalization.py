@@ -35,6 +35,17 @@ def extract_phone(participant: dict) -> str:
     return ""
 
 
+def extract_cpf(participant: dict) -> str:
+    """Mesmo padrão de extract_phone: CPF vem como resposta dentro de
+    custom_form (a pergunta varia entre eventos: "CPF", "Qual seu CPF?"
+    etc) — só alguns eventos pedem CPF no formulário de inscrição."""
+    for field in participant.get("custom_form") or []:
+        question = (field.get("name") or "").lower()
+        if "cpf" in question:
+            return field.get("value", "")
+    return ""
+
+
 def normalize_name(raw: str) -> str:
     """Lowercase, remove acentos e colapsa espaços — pra comparar nomes
     ignorando maiúsculas/formatação entre Sympla e Bitrix24."""

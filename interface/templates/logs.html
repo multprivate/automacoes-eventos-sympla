@@ -24,7 +24,7 @@
     <tbody>
         {% for i in itens %}
         <tr>
-            <td>{{ i.criado_em[:19].replace("T", " ") }}</td>
+            <td>{{ i.criado_em | brt }}</td>
             <td>{{ i.acao }}</td>
             <td><code>{{ i.entidade_ref }}</code></td>
             <td><span class="badge {{ 'badge-ok' if i.status == 'ok' else 'badge-error' }}">{{ i.status }}</span></td>

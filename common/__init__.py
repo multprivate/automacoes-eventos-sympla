@@ -59,6 +59,7 @@ from .constants import (
 )
 from .normalization import (
     build_cupom_by_order_id,
+    extract_cpf,
     extract_discount_code,
     extract_phone,
     format_event_label,
@@ -119,6 +120,7 @@ __all__ = [
     "VALOR_NAO_PRESENTE",
     "VALOR_PRESENTE",
     "build_cupom_by_order_id",
+    "extract_cpf",
     "extract_discount_code",
     "extract_phone",
     "format_event_label",
