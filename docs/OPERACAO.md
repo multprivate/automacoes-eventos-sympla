@@ -110,3 +110,11 @@ O plano free do Render dorme depois de um tempo sem tráfego (efeito colateral d
 Se a Automação B começar a demorar muito pra responder ou a regra de automação do Bitrix começar a dar timeout, o primeiro lugar pra olhar é se o ping externo dela ainda está ativo. Mesma lógica pro painel: se o Dashboard/Logs demorar ~30-50s pra carregar na primeira visita do dia, é o cold start do free tier — confere se o ping em `/health` do `sympla-dashboard` está configurado e rodando.
 
 Deploy é automático: qualquer push na branch conectada ao Render dispara um novo deploy.
+
+## Supabase não corre risco de repouso por inatividade
+
+O plano free do Supabase pausa o projeto depois de um período longo sem nenhuma atividade de API/banco — mas isso **não é um risco real aqui**, porque `sync_all_upcoming_events()` (`services/lead_sync_service.py`) já gera tráfego garantido no Supabase a cada execução do cron (a cada 30min via GitHub Actions), mesmo numa rodada "vazia" (zero eventos futuros, todos pausados/removidos): a trava global (`sync_locks`, select+upsert), a leitura de `eventos_config`, o insert em `execucoes_log` e a liberação da trava rodam sempre, incondicionalmente, antes da função retornar. Não existe caminho de saída que pule tudo isso.
+
+O `/health` do painel e da Automação B **não** contam pra isso — são endpoints deliberadamente leves que não tocam no Supabase (só confirmam que o processo Flask está de pé), então visitas ao painel não geram esse tráfego. Isso não importa na prática, porque o cron já cobre sozinho.
+
+**O risco real não é o Supabase "esquecer" da aplicação — é o cron parar de disparar** (PAT do GitHub expirado, cron-job.org fora do ar). Isso já tem uma rede de segurança parcial (`schedule:` nativo do GitHub Actions a cada 30min, ver `.github/workflows/automacao_a.yml`) e é monitorável pela aba Logs do painel: se não aparecem execuções novas há mais de ~1h, é sinal de que o disparo externo parou, não que o Supabase pausou sozinho.
