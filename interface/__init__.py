@@ -16,6 +16,7 @@ from .auth import auth_bp
 from .filters import to_brt
 from .routes_cupons import cupons_bp
 from .routes_dashboard import dashboard_bp
+from .routes_duplicados import duplicados_bp
 from .routes_eventos import eventos_bp
 from .routes_health import health_bp
 from .routes_logs import logs_bp
@@ -42,6 +43,7 @@ def create_app() -> Flask:
     app.register_blueprint(eventos_bp)
     app.register_blueprint(mapeamento_bp)
     app.register_blueprint(cupons_bp)
+    app.register_blueprint(duplicados_bp)
     app.register_blueprint(logs_bp)
     app.register_blueprint(health_bp)
 

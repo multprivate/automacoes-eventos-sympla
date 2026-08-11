@@ -13,6 +13,12 @@ load_dotenv()
 SYMPLA_TOKEN = os.environ["SYMPLA_TOKEN"]
 BITRIX_WEBHOOK_URL = os.environ["BITRIX_WEBHOOK_URL"].rstrip("/")
 
+# URL do portal (sem o /rest/.../TOKEN do webhook) — só pra montar link
+# clicável pra um card no painel administrativo, nunca usado em chamada de
+# API. BITRIX_WEBHOOK_URL é tipicamente "https://empresa.bitrix24.com.br
+# /rest/110/xxxxxxxx", então cortar em "/rest/" sobra a base do portal.
+BITRIX_PORTAL_URL = BITRIX_WEBHOOK_URL.split("/rest/")[0]
+
 SYMPLA_BASE = "https://api.sympla.com.br/public/v1.5.1"
 
 STAGE_INSCRITO_PRO_EVENTO = os.environ.get("BITRIX_STAGE_INSCRITO_PRO_EVENTO", "UC_2CK7JY")

@@ -69,6 +69,16 @@ def upsert(table: str, rows: list[dict], on_conflict: str) -> list[dict]:
     return resp.json()
 
 
+def update(table: str, filters: dict, fields: dict) -> None:
+    """Atualiza (PATCH) as linhas que batem com filters — diferente de
+    upsert(), não precisa de todas as colunas nem de on_conflict, só o
+    que de fato muda. Propaga erro, mesmo motivo de upsert()."""
+    url, headers = _base_url_and_headers()
+    headers = {**headers, "Content-Type": "application/json", "Prefer": "return=minimal"}
+    resp = requests.patch(f"{url}/rest/v1/{table}", headers=headers, params=filters, json=fields, timeout=10)
+    resp.raise_for_status()
+
+
 def delete(table: str, filters: dict) -> None:
     """Remove linhas que batem com filters (ex: {"cupom": "eq.MILETO"}).
     Propaga erro, mesmo motivo de upsert()."""

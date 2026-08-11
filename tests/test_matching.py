@@ -1,4 +1,10 @@
-from domain.matching import choose_primary_contact_id, contact_needs_new_lead, find_matching_contact_ids, find_matching_lead_ids
+from domain.matching import (
+    choose_primary_contact_id,
+    choose_primary_lead_id,
+    contact_needs_new_lead,
+    find_matching_contact_ids,
+    find_matching_lead_ids,
+)
 
 
 def _lookups(phone_result=None, email_result=None, name_result=None):
@@ -114,3 +120,33 @@ def test_choose_primary_contact_id_escolhe_o_menor():
 
 def test_choose_primary_contact_id_com_um_so():
     assert choose_primary_contact_id([42]) == 42
+
+
+class TestChoosePrimaryLeadId:
+    def test_vinculo_spa_vence_tudo(self):
+        primary, secondary = choose_primary_lead_id(
+            1, 2, tem_vinculo_spa_a=False, tem_vinculo_spa_b=True,
+            tem_email_a=True, tem_email_b=False, activities_a=10, activities_b=0,
+        )
+        assert (primary, secondary) == (2, 1)
+
+    def test_sem_vinculo_spa_email_desempata(self):
+        primary, secondary = choose_primary_lead_id(
+            1, 2, tem_vinculo_spa_a=False, tem_vinculo_spa_b=False,
+            tem_email_a=False, tem_email_b=True, activities_a=10, activities_b=0,
+        )
+        assert (primary, secondary) == (2, 1)
+
+    def test_sem_vinculo_e_sem_email_activities_desempata(self):
+        primary, secondary = choose_primary_lead_id(
+            1, 2, tem_vinculo_spa_a=False, tem_vinculo_spa_b=False,
+            tem_email_a=False, tem_email_b=False, activities_a=1, activities_b=5,
+        )
+        assert (primary, secondary) == (2, 1)
+
+    def test_tudo_igual_menor_id_vence(self):
+        primary, secondary = choose_primary_lead_id(
+            55164, 55162, tem_vinculo_spa_a=False, tem_vinculo_spa_b=False,
+            tem_email_a=False, tem_email_b=False, activities_a=0, activities_b=0,
+        )
+        assert (primary, secondary) == (55162, 55164)
