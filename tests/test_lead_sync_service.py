@@ -247,3 +247,20 @@ class TestConvidadoParaNoFluxoDeCliente:
 
         lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
         assert lead_update_calls == []
+
+
+class TestCriarItemEventoSpa:
+    def test_titulo_do_item_novo_comeca_pela_data(self, monkeypatch):
+        calls = {}
+        monkeypatch.setattr(lead_sync_service, "spa_find_item_by_sympla_event_id", lambda sympla_event_id: None)
+
+        def _fake_add_item(fields):
+            calls["fields"] = fields
+            return 999
+
+        monkeypatch.setattr(lead_sync_service, "spa_add_item", _fake_add_item)
+
+        item_id = lead_sync_service._find_or_create_evento_item("e1", "Arquitetura Patrimonial", "2026-08-26", 10, 3)
+
+        assert item_id == 999
+        assert calls["fields"]["title"] == "26/08/26 - Arquitetura Patrimonial"

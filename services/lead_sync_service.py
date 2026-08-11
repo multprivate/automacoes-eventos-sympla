@@ -188,8 +188,11 @@ def _find_or_create_evento_item(sympla_event_id: str, event_name: str, event_dat
     try:
         item = spa_find_item_by_sympla_event_id(sympla_event_id)
         if item is None:
+            # Data primeiro, depois o nome — só "Nome" ou "Nome (data)" fica
+            # difícil de ler numa lista com vários eventos (mesmo padrão já
+            # usado em ORIGENS_DISPONIVEIS/Filtrar Evento).
             item_id = spa_add_item({
-                "title": f"{event_name} ({event_date})" if event_date else event_name,
+                "title": format_event_label(event_name, event_date) if event_date else event_name,
                 FIELD_SPA_SYMPLA_EVENT_ID: sympla_event_id,
                 **stat_fields,
             })
