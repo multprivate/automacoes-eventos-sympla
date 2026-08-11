@@ -20,6 +20,7 @@
                 <li><a href="{{ url_for('eventos.index') }}" class="{{ 'active' if request.blueprint == 'eventos' else '' }}">Eventos</a></li>
                 <li><a href="{{ url_for('mapeamento.index') }}" class="{{ 'active' if request.blueprint == 'mapeamento' else '' }}">Mapeamento</a></li>
                 <li><a href="{{ url_for('cupons.index') }}" class="{{ 'active' if request.blueprint == 'cupons' else '' }}">Cupons</a></li>
+                <li><a href="{{ url_for('duplicados.index') }}" class="{{ 'active' if request.blueprint == 'duplicados' else '' }}">Verificação de Duplicados</a></li>
                 <li><a href="{{ url_for('logs.index') }}" class="{{ 'active' if request.blueprint == 'logs' else '' }}">Logs</a></li>
                 <li><a href="{{ url_for('auth.logout') }}">Sair</a></li>
             </ul>

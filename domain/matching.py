@@ -73,6 +73,32 @@ def contact_needs_new_lead(open_lead_ids: list[int]) -> bool:
     return not open_lead_ids
 
 
+def choose_primary_lead_id(
+    lead_a_id: int,
+    lead_b_id: int,
+    tem_vinculo_spa_a: bool,
+    tem_vinculo_spa_b: bool,
+    tem_email_a: bool,
+    tem_email_b: bool,
+    activities_a: int,
+    activities_b: int,
+) -> tuple[int, int]:
+    """Decide qual dos dois Leads de um par duplicado (services/
+    duplicidade_service.py::executar_merge) vira o principal (sobrevive) e
+    qual vira o secundário (é apagado depois de preservar o que tiver de
+    valor). Critério, em ordem de prioridade: quem já está vinculado a um
+    item da SPA de evento > quem tem e-mail cadastrado > quem tem mais
+    Activities (histórico de interação) > menor ID (mais antigo). Retorna
+    (id_principal, id_secundario)."""
+    candidatos = [
+        (lead_a_id, tem_vinculo_spa_a, tem_email_a, activities_a),
+        (lead_b_id, tem_vinculo_spa_b, tem_email_b, activities_b),
+    ]
+    principal = max(candidatos, key=lambda c: (c[1], c[2], c[3], -c[0]))
+    secundario = lead_b_id if principal[0] == lead_a_id else lead_a_id
+    return principal[0], secundario
+
+
 def choose_primary_contact_id(contact_ids: list[int]) -> int:
     """Quando um inscrito bate com mais de um Contato (dado duplicado
     pré-existente no Bitrix, não causado pela automação — ex: mesmo e-mail

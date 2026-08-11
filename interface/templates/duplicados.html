@@ -1,0 +1,38 @@
+{% extends "base.html" %}
+{% block title %}Verificação de Duplicados{% endblock %}
+{% block content %}
+<h2>Verificação de Duplicados</h2>
+<p class="page-subtitle">Pares de Lead com o mesmo telefone achados pela varredura periódica — confira os dois cards antes de decidir</p>
+
+<div class="table-wrap">
+<table>
+    <thead>
+        <tr>
+            <th>Lead A</th><th>Lead B</th><th>Telefone</th><th>Achado em</th><th>Ações</th>
+        </tr>
+    </thead>
+    <tbody>
+        {% for c in candidatos %}
+        <tr>
+            <td><a href="{{ c.url_a }}" target="_blank" rel="noopener">{{ c.nome_a or "(sem nome)" }} · #{{ c.lead_id_a }}</a></td>
+            <td><a href="{{ c.url_b }}" target="_blank" rel="noopener">{{ c.nome_b or "(sem nome)" }} · #{{ c.lead_id_b }}</a></td>
+            <td>{{ c.telefone_a }}</td>
+            <td>{{ c.criado_em | brt if c.criado_em else "" }}</td>
+            <td class="actions-cell">
+                <div class="actions-row">
+                    <form method="post" action="{{ url_for('duplicados.mesclar', candidato_id=c.id) }}" onsubmit="return confirm('Mesclar estes dois Leads? O secundário será apagado (histórico preservado como comentário no principal).');">
+                        <button type="submit" title="Escolhe automaticamente o Lead principal (vínculo com evento &gt; e-mail &gt; mais atividades &gt; mais antigo) e apaga o outro, preservando o histórico como comentário.">Mesclar</button>
+                    </form>
+                    <form method="post" action="{{ url_for('duplicados.ignorar_rota', candidato_id=c.id) }}">
+                        <button type="submit" class="secondary" title="Marca este par como não-duplicado (ex: mesmo telefone, pessoas diferentes) — não aparece mais nesta lista.">Ignorar</button>
+                    </form>
+                </div>
+            </td>
+        </tr>
+        {% else %}
+        <tr><td colspan="5">Nenhum candidato a duplicado pendente.</td></tr>
+        {% endfor %}
+    </tbody>
+</table>
+</div>
+{% endblock %}

@@ -8,6 +8,7 @@ from common.normalization import (
     normalize_cupom,
     normalize_email,
     normalize_name,
+    normalize_phone_suffix,
     participant_full_name,
 )
 
@@ -42,6 +43,27 @@ class TestFormatPhoneBr:
     def test_vazio(self):
         assert format_phone_br("") == ""
         assert format_phone_br(None) == ""
+
+
+class TestNormalizePhoneSuffix:
+    def test_com_e_sem_ddi_convergem(self):
+        assert normalize_phone_suffix("+5585988220472") == normalize_phone_suffix("8588220472")
+
+    def test_com_e_sem_nono_digito_convergem(self):
+        assert normalize_phone_suffix("(85) 98863-2263") == normalize_phone_suffix("8588632263")
+
+    def test_remove_tracos_espacos_e_parenteses(self):
+        assert normalize_phone_suffix("(85) 98863-2263") == normalize_phone_suffix("85988632263")
+
+    def test_numero_sem_ddd_nao_perde_digito(self):
+        """Sem DDD (10/11 dígitos), não dá pra saber se a posição [2] é o
+        DDD + 9 — só remove o 9º dígito quando há DDD reconhecível (11
+        dígitos totais)."""
+        assert normalize_phone_suffix("8863-2263") == "88632263"
+
+    def test_vazio(self):
+        assert normalize_phone_suffix("") == ""
+        assert normalize_phone_suffix(None) == ""
 
 
 class TestExtractPhone:

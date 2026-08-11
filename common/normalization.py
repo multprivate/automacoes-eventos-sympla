@@ -23,6 +23,24 @@ def format_phone_br(raw: str) -> str:
     return f"+{digits}"
 
 
+def normalize_phone_suffix(raw: str) -> str:
+    """Chave de COMPARAÇÃO pra achar duplicados por telefone — não é o
+    formato canônico gravado no Bitrix (isso continua sendo
+    format_phone_br). Remove tudo que não é dígito, remove o DDI 55 se
+    presente, e remove o 9º dígito de celular se for o caso — assim
+    "(85) 98863-2263" e "8863-2263" (mesmo número, um com o 9 e outro
+    sem, os dois formatos coexistem em cadastros antigos) convergem pra
+    MESMA chave em vez de parecerem números diferentes."""
+    digits = re.sub(r"\D", "", raw or "")
+    if not digits:
+        return ""
+    if len(digits) > 11 and digits.startswith("55"):
+        digits = digits[2:]
+    if len(digits) == 11 and digits[2] == "9":
+        digits = digits[:2] + digits[3:]
+    return digits
+
+
 def extract_phone(participant: dict) -> str:
     """O telefone vem como resposta dentro de custom_form, atrelada à
     pergunta do formulário de inscrição (o texto pode variar entre

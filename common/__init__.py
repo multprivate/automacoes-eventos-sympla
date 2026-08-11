@@ -30,6 +30,7 @@ from .bitrix_spa_client import (
     update_item as spa_update_item,
 )
 from .constants import (
+    BITRIX_PORTAL_URL,
     BITRIX_SPA_ENTITY_TYPE_ID,
     BITRIX_WEBHOOK_URL,
     FIELD_DATA_DO_EVENTO,
@@ -67,6 +68,7 @@ from .normalization import (
     normalize_cupom,
     normalize_email,
     normalize_name,
+    normalize_phone_suffix,
     participant_full_name,
 )
 from .sympla_client import (
@@ -93,6 +95,7 @@ __all__ = [
     "spa_get_item",
     "spa_update_item",
     "_merge_enum_items",
+    "BITRIX_PORTAL_URL",
     "BITRIX_SPA_ENTITY_TYPE_ID",
     "BITRIX_WEBHOOK_URL",
     "FIELD_DATA_DO_EVENTO",
@@ -128,6 +131,7 @@ __all__ = [
     "normalize_cupom",
     "normalize_email",
     "normalize_name",
+    "normalize_phone_suffix",
     "participant_full_name",
     "get_all_events",
     "get_sympla_all_orders",

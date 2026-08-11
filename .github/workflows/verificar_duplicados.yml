@@ -1,0 +1,32 @@
+name: Verificar Leads duplicados por telefone
+
+on:
+  # Varredura de baixa urgência (dado já existente, não um evento novo
+  # chegando) — diária basta, diferente da Automação A que precisa reagir
+  # rápido a inscrição nova.
+  schedule:
+    - cron: "0 6 * * *"
+  workflow_dispatch: {}
+
+concurrency:
+  group: verificar-duplicados
+  cancel-in-progress: false
+
+jobs:
+  verificar:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - run: pip install -r requirements.txt
+
+      - run: python verificar_duplicados.py
+        env:
+          SYMPLA_TOKEN: ${{ secrets.SYMPLA_TOKEN }}
+          BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}
+          SUPABASE_URL: ${{ secrets.SUPABASE_URL }}
+          SUPABASE_SERVICE_KEY: ${{ secrets.SUPABASE_SERVICE_KEY }}
