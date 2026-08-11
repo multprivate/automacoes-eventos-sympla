@@ -94,6 +94,7 @@ def _resolve_field_config() -> dict:
         "field_nome_do_evento": config_service.get_field_nome_do_evento(),
         "field_sympla_event_id": config_service.get_field_sympla_event_id(),
         "field_filtrar_evento": config_service.get_field_filtrar_evento(),
+        "field_cliente_convidado_para": config_service.get_field_cliente_convidado_para(),
         "field_origem": config_service.get_field_origem(),
         "stage_alvo": config_service.get_stage_inscrito_pro_evento(),
     }
@@ -150,6 +151,17 @@ def _already_linked_to_item(entity: dict, item_id: int) -> bool:
     return str(entity.get(FIELD_PARENT_ID_EVENTO_SPA)) == str(item_id)
 
 
+def _merged_convidado_para(lead: dict, field_code: str, novo_id: str) -> list[str] | None:
+    """Acrescenta o evento à lista do campo "Cliente convidado para" sem
+    apagar os que já tinham — campo MULTIPLE=Y (múltipla escolha de
+    verdade), diferente de PARENT_ID_1112, que só aceita um evento por
+    vez. Retorna None se o valor já está lá (nada a fazer)."""
+    atuais = [str(v) for v in (lead.get(field_code) or [])]
+    if str(novo_id) in atuais:
+        return None
+    return atuais + [str(novo_id)]
+
+
 def _find_open_lead_ids_for_contact(contact_id: int) -> list[int]:
     leads = bitrix_list_all("crm.lead.list", {"filter": {"CONTACT_ID": contact_id}, "select": ["ID", "STATUS_ID"]})
     return [int(lead["ID"]) for lead in leads if lead.get("STATUS_ID") not in LEAD_CLOSED_STAGES]
@@ -176,8 +188,11 @@ def _find_or_create_evento_item(sympla_event_id: str, event_name: str, event_dat
     try:
         item = spa_find_item_by_sympla_event_id(sympla_event_id)
         if item is None:
+            # Data primeiro, depois o nome — só "Nome" ou "Nome (data)" fica
+            # difícil de ler numa lista com vários eventos (mesmo padrão já
+            # usado em ORIGENS_DISPONIVEIS/Filtrar Evento).
             item_id = spa_add_item({
-                "title": f"{event_name} ({event_date})" if event_date else event_name,
+                "title": format_event_label(event_name, event_date) if event_date else event_name,
                 FIELD_SPA_SYMPLA_EVENT_ID: sympla_event_id,
                 **stat_fields,
             })
@@ -204,7 +219,7 @@ def build_cupom_map_loader(event_id: str):
     return get
 
 
-def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None) -> int:
+def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None, convidado_para_id: str = "") -> int:
     """Cria um Lead novo. contact_id/item_id são usados no branch "cliente"
     (Contato já existente sem Lead aberto no funil): mesma lógica de
     cupom→assessor/origem de sempre também se aplica aqui — decisão
@@ -227,6 +242,8 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
         fields[field_config["field_sympla_event_id"]] = sympla_event_id
     if field_config["field_filtrar_evento"] and filtrar_evento_id:
         fields[field_config["field_filtrar_evento"]] = filtrar_evento_id
+    if field_config["field_cliente_convidado_para"] and convidado_para_id:
+        fields[field_config["field_cliente_convidado_para"]] = [convidado_para_id]
     if field_config["field_origem"]:
         fields[field_config["field_origem"]] = resolve_enum_id(field_config["field_origem"], origem_valor)
     if assessor_email:
@@ -246,7 +263,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     return int(new_id)
 
 
-def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool) -> None:
+def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, convidado_para_id: str = "") -> None:
     """Branch "cliente": o inscrito bateu com um Contato já existente.
     Vincula o Contato ao item do evento; se o Contato não tem nenhum Lead
     aberto no funil, cria um Lead novo (mesma lógica de cupom→assessor de
@@ -286,20 +303,25 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
             create_lead_from_participant(
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
                 stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
-                contact_id=contact_id, item_id=item_id,
+                contact_id=contact_id, item_id=item_id, convidado_para_id=convidado_para_id,
             )
         else:
             for lead_id in open_lead_ids:
-                if not item_id:
-                    continue
                 lead = get_lead(lead_id)
-                if force or not _already_linked_to_item(lead, item_id):
-                    bitrix_call("crm.lead.update", {"id": lead_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
+                fields = {}
+                if item_id and (force or not _already_linked_to_item(lead, item_id)):
+                    fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+                if field_config["field_cliente_convidado_para"] and convidado_para_id:
+                    merged = _merged_convidado_para(lead, field_config["field_cliente_convidado_para"], convidado_para_id)
+                    if merged is not None:
+                        fields[field_config["field_cliente_convidado_para"]] = merged
+                if fields:
+                    bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
-                    log.info("Lead %s (cliente já com Lead aberto) vinculado ao evento %s (item %s).", lead_id, event_name, item_id)
+                    log.info("Lead %s (cliente já com Lead aberto) atualizado pro evento %s: %s", lead_id, event_name, fields)
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False) -> bool:
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False, convidado_para_id: str = "") -> bool:
     """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
     ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
     errado e precisa ser tentado de novo na próxima execução. Só entra na
@@ -340,7 +362,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
 
     if contact_ids:
         try:
-            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force)
+            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, convidado_para_id=convidado_para_id)
             return True
         except Exception as exc:
             log.error("Falha ao processar cliente (contato) pro inscrito %s: %s", participant.get("id"), exc)
@@ -376,6 +398,10 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=lead, force=force))
                 if item_id and (force or not _already_linked_to_item(lead, item_id)):
                     fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+                if field_config["field_cliente_convidado_para"] and convidado_para_id:
+                    merged = _merged_convidado_para(lead, field_config["field_cliente_convidado_para"], convidado_para_id)
+                    if merged is not None:
+                        fields[field_config["field_cliente_convidado_para"]] = merged
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
@@ -384,7 +410,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
         elif phone_key:
-            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id)
+            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id, convidado_para_id=convidado_para_id)
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
         return True
@@ -466,11 +492,19 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
         except Exception as exc:
             log.error("Falha ao garantir item '%s' na lista do campo %s: %s", label, field_config["field_filtrar_evento"], exc)
 
+    convidado_para_id = ""
+    if field_config["field_cliente_convidado_para"]:
+        label = format_event_label(event_name, event_date)
+        try:
+            convidado_para_id = ensure_enum_value(field_config["field_cliente_convidado_para"], label)
+        except Exception as exc:
+            log.error("Falha ao garantir item '%s' na lista do campo %s: %s", label, field_config["field_cliente_convidado_para"], exc)
+
     get_cupom_map = build_cupom_map_loader(event_id)
     newly_done = {
         str(participant.get("id"))
         for participant in participants_to_process
-        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force)
+        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force, convidado_para_id=convidado_para_id)
     }
 
     if not newly_done:

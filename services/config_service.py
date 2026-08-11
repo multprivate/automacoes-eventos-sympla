@@ -17,6 +17,7 @@ import logging
 import time
 
 from common import (
+    FIELD_CLIENTE_CONVIDADO_PARA,
     FIELD_DATA_DO_EVENTO,
     FIELD_FILTRAR_EVENTO,
     FIELD_NOME_DO_EVENTO,
@@ -37,6 +38,7 @@ _DEFAULTS = {
     "FIELD_SYMPLA_EVENT_ID": FIELD_SYMPLA_EVENT_ID,
     "FIELD_ORIGEM": FIELD_ORIGEM,
     "FIELD_FILTRAR_EVENTO": FIELD_FILTRAR_EVENTO,
+    "FIELD_CLIENTE_CONVIDADO_PARA": FIELD_CLIENTE_CONVIDADO_PARA,
     "STAGE_INSCRITO_PRO_EVENTO": STAGE_INSCRITO_PRO_EVENTO,
 }
 
@@ -85,6 +87,10 @@ def get_field_origem() -> str:
 
 def get_field_filtrar_evento() -> str:
     return load_config()["FIELD_FILTRAR_EVENTO"]
+
+
+def get_field_cliente_convidado_para() -> str:
+    return load_config()["FIELD_CLIENTE_CONVIDADO_PARA"]
 
 
 def get_stage_inscrito_pro_evento() -> str:
