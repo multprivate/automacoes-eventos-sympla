@@ -6,17 +6,17 @@ Este documento explica como as coisas funcionam por dentro. Se você só precisa
 
 O código deixou de ser um punhado de scripts soltos e passou a ter responsabilidade separada por camada:
 
-- **`common/`** (era `common.py`, virou pacote): chamadas de API do Bitrix24 (`bitrix_client.py`) e da Sympla (`sympla_client.py`), com retry/backoff em falha transitória, mais normalização pura (`normalization.py`) e constantes/config vindas do `.env` (`constants.py`). Único ponto de acoplamento entre Automação A e Automação B — o `from common import (...)` da Automação B nunca muda.
+- **`common/`** (era `common.py`, virou pacote): chamadas de API do Bitrix24 (`bitrix_client.py`) e da Sympla (`sympla_client.py`), com retry/backoff em falha transitória, mais normalização pura (`normalization.py`) e constantes/config vindas do `.env` (`constants.py`).
 - **`domain/`**: regras de negócio puras, sem chamada de rede — `stage_rules.py` (quando avançar estágio), `coupons.py` (cupom → assessor/origem), `matching.py` (cascata telefone→email→nome, testável com lookups falsos). Testadas por `pytest` sem precisar de credencial real.
 - **`services/`**: orquestração. `lead_sync_service.py` é o motor de verdade (`sync_all_upcoming_events()`/`sync_one_event()`), usado tanto pelo Cron Job agendado quanto pelo painel. `coupon_service.py` e `config_service.py` resolvem cupom/campos consultando o Supabase, com fallback pro valor fixo se o banco cair.
 - **`repositories/`**: acesso ao Supabase via REST (PostgREST), um wrapper fino por tabela — sem SDK adicional, mesmo espírito do `bitrix_client.py`.
-- **`interface/`**: o painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs), um processo Flask **separado** da Automação B — nunca importa nem é importado por ela.
+- **`interface/`**: o painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs/Verificação de Duplicados), um processo Flask próprio.
 - **`automacao_a_inscricoes.py`**: virou um wrapper de CLI fino, só lê `TEST_EVENT_IDS` e chama `lead_sync_service.sync_all_upcoming_events()`.
 
 ## Tabelas no Supabase
 
 - **`assessores_cupom`**: mapa cupom → assessor (ou cupom → origem de canal). Editável pela aba Cupons do painel. Fallback: `domain/coupons.py::_DEFAULT_ASSESSOR_POR_CUPOM`/`_DEFAULT_ORIGEM_POR_CUPOM_CANAL`.
-- **`config_kv`**: códigos de campo/estágio do Bitrix (`FIELD_DATA_DO_EVENTO`, `FIELD_NOME_DO_EVENTO`, `FIELD_SYMPLA_EVENT_ID`, `FIELD_ORIGEM`, `FIELD_FILTRAR_EVENTO`, `STAGE_INSCRITO_PRO_EVENTO`). Editável pela aba Mapeamento. Fallback: valor do `.env` (`common/constants.py`). **`FIELD_PRESENTE_NO_EVENTO` não está aqui** — é da Automação B, que continua lendo direto do `.env`/secrets do próprio serviço dela.
+- **`config_kv`**: códigos de campo/estágio do Bitrix (`FIELD_DATA_DO_EVENTO`, `FIELD_NOME_DO_EVENTO`, `FIELD_SYMPLA_EVENT_ID`, `FIELD_ORIGEM`, `FIELD_FILTRAR_EVENTO`, `FIELD_PRESENTE_NO_EVENTO`, `STAGE_INSCRITO_PRO_EVENTO`, `STAGE_POS_EVENTO`). Editável pela aba Mapeamento. Fallback: valor do `.env` (`common/constants.py`).
 - **`eventos_config`**: liga/desliga por evento (toggle Ativo/Inativo e "Remover" na aba Eventos) e os contadores/timestamp de sincronização que alimentam o Dashboard. Filtro fail-**aberto**: se essa tabela cair, todo evento é tratado como ativo (não trava a sincronização).
 - **`participantes_processados`**: substitui o antigo `.cache/sympla_processed.json` — idempotência real, compartilhada entre o Cron Job e o painel. Fail-**fechado**: se não conseguir ler, o evento inteiro é pulado naquela rodada (nunca trata "não consegui ler" como "ninguém processado ainda").
 - **`sync_locks`**: trava contra o painel e o Cron Job tentarem sincronizar o mesmo evento ao mesmo tempo.
@@ -26,7 +26,7 @@ O código deixou de ser um punhado de scripts soltos e passou a ter responsabili
 
 A documentação oficial da Sympla é incompleta em alguns pontos, e a gente descobriu o formato de verdade testando contra a API. Vale registrar pra ninguém precisar redescobrir:
 
-**Telefone e CPF** vêm dentro de `custom_form`, como respostas do formulário de inscrição, não como campos fixos do participante. O texto da pergunta varia de evento pra evento ("Telefone", "WhatsApp/Telefone", "Celular"), por isso `extract_phone()` em `common.py` procura por palavras-chave no nome da pergunta em vez de um nome de campo fixo.
+**Telefone e CPF** vêm dentro de `custom_form`, como respostas do formulário de inscrição, não como campos fixos do participante. O texto da pergunta varia de evento pra evento ("Telefone", "WhatsApp/Telefone", "Celular"), por isso `extract_phone()` em `common/normalization.py` procura por palavras-chave no nome da pergunta em vez de um nome de campo fixo.
 
 **Cupom de desconto** é a parte mais traiçoeira. Existem dois lugares onde ele pode aparecer:
 - `participant.order_discount`, direto no registro do participante.
@@ -68,7 +68,7 @@ Pra adicionar assessor ou variação de cupom nova, o jeito mais simples é pela
 
 Tem uma pegadinha aqui: `UC_TJ9FPC` ("Reunião") não segue o padrão de nome dos estágios novos (não tem o prefixo `[NEW]`), mas é funil novo mesmo assim. Se o funil mudar de novo no futuro, vale conferir cada estágio na tela do Bitrix antes de simplesmente confiar no prefixo do nome.
 
-**Nenhum desses dois modelos vai até "Pós Evento".** Esse estágio (e o que acontece nele — marcar presença) fica inteiramente fora deste repositório: é uma automação nativa do Bitrix (robô/regra de funil configurada na própria tela do Bitrix) que move o Lead pra lá, em algum momento depois do evento. É a ENTRADA nesse estágio que dispara o `/webhook/pos-evento` da Automação B (ver docstring de `automacao_b_presenca.py`), não o contrário — nenhum script daqui decide quando isso acontece. Na prática isso significa que um Lead pode passar horas ou dias em "Inscrito Pro Evento" sem o campo "Presente no Evento" nunca aparecer preenchido, e isso não é bug: é só que o robô do Bitrix ainda não moveu ele pra "Pós Evento".
+**Um terceiro estágio, "Pós Evento" (`STAGE_POS_EVENTO`), existe pra depois que o evento já aconteceu.** Isso costumava ser um robô nativo do Bitrix (configurado na própria tela do funil) que movia o Lead pra lá depois do evento, disparando um webhook (Automação B, hoje aposentada) que preenchia "Presente no evento" reagindo a essa entrada. Esse robô foi desligado — hoje é o botão **"Forçar atualização de campos"** da aba Eventos quem faz as duas coisas juntas (`domain/stage_rules.py::deve_mover_pos_evento`, `services/lead_sync_service.py::_aplicar_pos_evento`): se o evento já passou, move QUALQUER Lead aberto (funil novo ou antigo) pra "Pós Evento" com "Presente no evento" já preenchido (Presente/Não Presente, conforme o check-in real na Sympla), exceto os já Ganhos/Perdidos (`LEAD_CLOSED_STAGES`). Diferente do avanço normal pra "Inscrito Pro Evento", essa transição É deliberadamente aplicada em Lead de funil antigo também — sem isso, esses Leads ficariam presos pra sempre sem presença marcada, já que ninguém mais move eles.
 
 ## A tabela que evita reprocessar todo mundo
 

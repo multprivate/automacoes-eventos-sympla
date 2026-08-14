@@ -33,8 +33,3 @@ def add_item(fields: dict, entity_type_id: int = BITRIX_SPA_ENTITY_TYPE_ID) -> i
 
 def update_item(item_id: int, fields: dict, entity_type_id: int = BITRIX_SPA_ENTITY_TYPE_ID) -> None:
     bitrix_call("crm.item.update", {"entityTypeId": entity_type_id, "id": item_id, "fields": fields})
-
-
-def get_item(item_id: int, entity_type_id: int = BITRIX_SPA_ENTITY_TYPE_ID) -> dict:
-    result = bitrix_call("crm.item.get", {"entityTypeId": entity_type_id, "id": item_id})
-    return result["item"]

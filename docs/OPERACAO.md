@@ -6,14 +6,15 @@ Guia pro dia a dia: o que fazer quando precisa mudar alguma coisa, como testar s
 
 | Variável | Obrigatória? | Usada em | Pra que serve |
 |---|---|---|---|
-| `SYMPLA_TOKEN` | Sim | A, B | Token da API da Sympla (`s_token`). |
-| `BITRIX_WEBHOOK_URL` | Sim | A, B | URL do webhook de entrada do Bitrix, sem o nome do método no final. |
+| `SYMPLA_TOKEN` | Sim | A | Token da API da Sympla (`s_token`). |
+| `BITRIX_WEBHOOK_URL` | Sim | A | URL do webhook de entrada do Bitrix, sem o nome do método no final. |
 | `BITRIX_STAGE_INSCRITO_PRO_EVENTO` | Não (tem default) | A | Código do estágio "Inscrito Pro Evento" no funil de Leads. |
 | `BITRIX_FIELD_DATA_DO_EVENTO` | Não | A | Código (`UF_CRM_...`) do campo customizado "Data do evento". |
 | `BITRIX_FIELD_NOME_DO_EVENTO` | Não | A | Código do campo "Nome do evento". |
-| `BITRIX_FIELD_SYMPLA_EVENT_ID` | Não | A, B | Código do campo com o ID interno do evento Sympla. |
+| `BITRIX_FIELD_SYMPLA_EVENT_ID` | Não | A | Código do campo com o ID interno do evento Sympla. |
 | `BITRIX_FIELD_ORIGEM` | Não | A | Código do campo "Origem". |
-| `BITRIX_FIELD_PRESENTE_NO_EVENTO` | Não | B | Código do campo "Presente no evento". |
+| `BITRIX_FIELD_PRESENTE_NO_EVENTO` | Não | A | Código do campo "Presente no evento" — preenchido pelo botão "Forçar atualização de campos" quando o evento já passou. |
+| `BITRIX_STAGE_POS_EVENTO` | Não (tem default) | A | Código do estágio "Pós Evento" no funil de Leads — pra onde "Forçar atualização de campos" move o Lead junto com a presença. |
 | `BITRIX_FIELD_FILTRAR_EVENTO` | Não | A | Código do campo "Filtrar Evento" (lista, um item por evento — `"DD/MM/AA - Nome do Evento"`). Aparece como checkbox de múltipla seleção na aba de Filtros da listagem de Leads. |
 | `TEST_EVENT_IDS` | Não | A | Lista de `event_id` (separados por vírgula) pra restringir a Automação A só a esses eventos. Deixe vazio em produção. |
 | `SUPABASE_URL` | Não* | A, painel | URL do projeto Supabase. Sem ela, cupons/mapeamento caem pro fallback fixo no código, e o painel não funciona. |
@@ -61,12 +62,13 @@ Isso cria/atualiza Leads de verdade, mas só pros participantes desse evento. De
 
 ## O painel administrativo
 
-Um Flask separado (`interface_app.py`, blueprints em `interface/`), rodando como serviço próprio no Render (`sympla-dashboard` no `render.yaml`) — nunca dentro do processo da Automação B. Login por senha única (`ADMIN_PASSWORD`).
+Um Flask separado (`interface_app.py`, blueprints em `interface/`), rodando como serviço próprio (`sympla-dashboard` no `render.yaml`). Login por senha única (`ADMIN_PASSWORD`).
 
 - **Dashboard**: visão geral (eventos futuros/sincronizados, última execução).
-- **Eventos**: lista de eventos com contadores, e os botões "Sincronizar agora" (só participantes novos), "Forçar atualização de campos" (reenvia os 4 campos de evento mesmo já iguais, sem forçar estágio), "Remover"/toggle Ativo-Inativo (pausa/exclui o evento da sincronização automática, sem apagar histórico).
+- **Eventos**: lista de eventos com contadores, e os botões "Sincronizar agora" (só participantes novos), "Forçar atualização de campos" (reenvia os campos de evento mesmo já iguais; se o evento já passou, também preenche "Presente no evento" e move os Leads pra "Pós Evento", exceto Ganho/Perdido), "Remover"/toggle Ativo-Inativo (pausa/exclui o evento da sincronização automática, sem apagar histórico).
 - **Mapeamento**: edita `config_kv` (códigos de campo/estágio do Bitrix).
 - **Cupons**: edita `assessores_cupom`.
+- **Verificação de Duplicados**: candidatos a Lead duplicado achados pela varredura de telefone, com botões Mesclar/Ignorar.
 - **Logs**: histórico fino de sincronizações (`execucoes_log_itens`), com duração e erro por evento.
 
 Rodar local: `flask --app interface_app run --port 5002`.
@@ -103,18 +105,18 @@ Confere se o código do campo no `.env` (ou no secret do GitHub) é o mesmo que 
 **`400 Bad Request` em `crm.lead.userfield.add`**
 Provavelmente já existe um campo com esse `FIELD_NAME`, e o script tentou criar de novo. Acontece quando o campo foi criado manualmente com um código fora do padrão que os scripts esperam. Confere na tela de Campos Personalizados do Bitrix se não ficou um campo duplicado.
 
-## Serviços no Render
+## Serviço web do painel
 
-O plano free do Render dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). Os dois serviços web (`automacao-b-presenca` e `sympla-dashboard`) têm cada um seu próprio `/health` (público, sem login, só confirma que o processo está de pé) — e cada um precisa do seu próprio ping externo (cron-job.org ou parecido) batendo nele a cada 10 minutos pra não dormir. São dois jobs de cron separados, um por serviço; manter um dos dois vivo não mantém o outro acordado.
+O plano free do Render (ou de qualquer outra hospedagem free-tier equivalente) dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). O serviço `sympla-dashboard` tem seu próprio `/health` (público, sem login, só confirma que o processo está de pé) — precisa de um ping externo (cron-job.org ou parecido) batendo nele periodicamente pra não dormir.
 
-Se a Automação B começar a demorar muito pra responder ou a regra de automação do Bitrix começar a dar timeout, o primeiro lugar pra olhar é se o ping externo dela ainda está ativo. Mesma lógica pro painel: se o Dashboard/Logs demorar ~30-50s pra carregar na primeira visita do dia, é o cold start do free tier — confere se o ping em `/health` do `sympla-dashboard` está configurado e rodando.
+Se o Dashboard/Logs demorar ~30-50s pra carregar na primeira visita do dia, é o cold start do free tier — confere se o ping em `/health` do `sympla-dashboard` está configurado e rodando.
 
-Deploy é automático: qualquer push na branch conectada ao Render dispara um novo deploy.
+Deploy é automático: qualquer push na branch conectada à hospedagem dispara um novo deploy.
 
 ## Supabase não corre risco de repouso por inatividade
 
 O plano free do Supabase pausa o projeto depois de um período longo sem nenhuma atividade de API/banco — mas isso **não é um risco real aqui**, porque `sync_all_upcoming_events()` (`services/lead_sync_service.py`) já gera tráfego garantido no Supabase a cada execução do cron (a cada 30min via GitHub Actions), mesmo numa rodada "vazia" (zero eventos futuros, todos pausados/removidos): a trava global (`sync_locks`, select+upsert), a leitura de `eventos_config`, o insert em `execucoes_log` e a liberação da trava rodam sempre, incondicionalmente, antes da função retornar. Não existe caminho de saída que pule tudo isso.
 
-O `/health` do painel e da Automação B **não** contam pra isso — são endpoints deliberadamente leves que não tocam no Supabase (só confirmam que o processo Flask está de pé), então visitas ao painel não geram esse tráfego. Isso não importa na prática, porque o cron já cobre sozinho.
+O `/health` do painel **não** conta pra isso — é um endpoint deliberadamente leve que não toca no Supabase (só confirma que o processo Flask está de pé), então visitas ao painel não geram esse tráfego. Isso não importa na prática, porque o cron já cobre sozinho.
 
 **O risco real não é o Supabase "esquecer" da aplicação — é o cron parar de disparar** (PAT do GitHub expirado, cron-job.org fora do ar). Isso já tem uma rede de segurança parcial (`schedule:` nativo do GitHub Actions a cada 30min, ver `.github/workflows/automacao_a.yml`) e é monitorável pela aba Logs do painel: se não aparecem execuções novas há mais de ~1h, é sinal de que o disparo externo parou, não que o Supabase pausou sozinho.

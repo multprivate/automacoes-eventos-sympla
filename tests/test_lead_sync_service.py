@@ -54,7 +54,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
         )
 
         assert any(m == "create_lead" for m, _ in calls)
@@ -72,7 +72,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
         )
 
         lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
@@ -90,7 +90,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
         )
 
         assert not any(method == "crm.contact.update" for method, _ in calls)
@@ -107,7 +107,7 @@ class TestProcessClienteParticipant:
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [25216, 538], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, {}, "", {}, [], item_id=28, force=False,
+            stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
         )
 
         # só processa o de menor ID (538), não cria um Lead pra cada Contato
@@ -148,6 +148,36 @@ class TestProcessParticipantDispatch:
             {"id": "1", "email": ""}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
         assert result is True  # sem telefone/e-mail/nome batendo -> pulado, mas tratado como sucesso
+
+
+class TestSyncOneEvent:
+    """sync_one_event() usa get_all_events() (todo evento, passado ou
+    futuro), não list_upcoming_events() — "Forçar campos" precisa
+    funcionar em evento já passado (ver eventos_helper.py)."""
+
+    def test_acha_evento_passado_via_get_all_events(self, monkeypatch):
+        monkeypatch.setattr(
+            lead_sync_service, "get_all_events",
+            lambda: [{"id": "e_passado", "name": "Evento Passado", "start_date": "2020-01-01T10:00:00-03:00"}],
+        )
+        monkeypatch.setattr(
+            lead_sync_service, "list_upcoming_events",
+            lambda: (_ for _ in ()).throw(AssertionError("não deveria usar list_upcoming_events aqui")),
+        )
+        monkeypatch.setattr(lead_sync_service, "process_event", lambda event, stats, force=False: True)
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_execucao", lambda *a, **kw: None)
+
+        result = lead_sync_service.sync_one_event("e_passado", force=True)
+        assert result["event_id"] == "e_passado"
+        assert result["changed"] is True
+
+    def test_evento_nao_encontrado_levanta_erro(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "get_all_events", lambda: [])
+        try:
+            lead_sync_service.sync_one_event("e_inexistente")
+            assert False, "deveria ter levantado ValueError"
+        except ValueError:
+            pass
 
 
 class TestSyncAllUpcomingEventsLock:
@@ -194,3 +224,133 @@ class TestSyncAllUpcomingEventsLock:
             pass
 
         assert calls == ["global"]
+
+
+POS_EVENTO_FIELD_CONFIG = {"field_presente_no_evento": "UF_PRESENTE", "stage_pos_evento": "NEWPOSEVENTO"}
+
+
+class TestAplicarPosEvento:
+    """A Automação B foi aposentada — quem preenche "Presente no evento" e
+    move o Lead pra "Pós Evento" agora é o botão "Forçar atualização de
+    campos", via _aplicar_pos_evento."""
+
+    def test_evento_passado_force_presente_seta_status_e_presenca(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "NEWINSCRITO", True, True, True, POS_EVENTO_FIELD_CONFIG)
+        assert fields["STATUS_ID"] == "NEWPOSEVENTO"
+        assert fields["UF_PRESENTE"] == "ID-Presente"
+
+    def test_nao_presente_resolve_valor_nao_presente(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "NEWINSCRITO", True, True, False, POS_EVENTO_FIELD_CONFIG)
+        assert fields["UF_PRESENTE"] == "ID-Não Presente"
+
+    def test_lead_ganho_nao_mexe(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda *a: (_ for _ in ()).throw(AssertionError("não deveria resolver enum")))
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "CONVERTED", True, True, True, POS_EVENTO_FIELD_CONFIG)
+        assert fields == {}
+
+    def test_lead_perdido_nao_mexe(self):
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "JUNK", True, True, True, POS_EVENTO_FIELD_CONFIG)
+        assert fields == {}
+
+    def test_sem_force_nao_mexe(self):
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "NEWINSCRITO", True, False, True, POS_EVENTO_FIELD_CONFIG)
+        assert fields == {}
+
+    def test_evento_nao_passou_nao_mexe(self):
+        fields = {}
+        lead_sync_service._aplicar_pos_evento(fields, "NEWINSCRITO", False, True, True, POS_EVENTO_FIELD_CONFIG)
+        assert fields == {}
+
+    def test_sem_campo_presente_configurado_so_move_estagio(self):
+        fields = {}
+        field_config = {"field_presente_no_evento": "", "stage_pos_evento": "NEWPOSEVENTO"}
+        lead_sync_service._aplicar_pos_evento(fields, "NEWINSCRITO", True, True, True, field_config)
+        assert fields == {"STATUS_ID": "NEWPOSEVENTO"}
+
+
+class TestContatoComLeadAbertoPosEvento:
+    def test_evento_passado_force_move_pos_evento_mesmo_funil_antigo(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "UC_Z0M384"})
+        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
+
+        stats = STATS()
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=None, force=True, event_already_happened=True, checked_in=True,
+        )
+
+        lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert lead_update_calls[0]["id"] == 777
+        assert lead_update_calls[0]["fields"]["STATUS_ID"] == "NEWPOSEVENTO"
+        assert lead_update_calls[0]["fields"]["UF_PRESENTE"] == "ID-Presente"
+        assert stats["leads_atualizados"] == 1
+
+    def test_evento_nao_passado_nao_mexe(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "UC_Z0M384"})
+        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+
+        stats = STATS()
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=None, force=True, event_already_happened=False, checked_in=True,
+        )
+
+        assert not any(method == "crm.lead.update" for method, _ in calls)
+        assert stats["leads_atualizados"] == 0
+
+
+class TestCreateLeadFromParticipantPosEvento:
+    def _base_field_config(self):
+        return {
+            "field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "",
+            "field_filtrar_evento": "", "field_origem": "", "stage_alvo": "NEWINSCRITO",
+            "field_presente_no_evento": "UF_PRESENTE", "stage_pos_evento": "NEWPOSEVENTO",
+        }
+
+    def test_lead_novo_pra_evento_passado_ja_nasce_em_pos_evento(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or "123")
+        monkeypatch.setattr(lead_sync_service, "resolve_assessor_and_origem", lambda cupom: (None, "Inscrito Desconhecido"))
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
+
+        stats = STATS()
+        participant = {"id": "1", "first_name": "Fulano", "last_name": "Teste"}
+        lead_sync_service.create_lead_from_participant(
+            participant, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, self._base_field_config(), "", {}, [],
+            event_already_happened=True, force=True, checked_in=False,
+        )
+
+        add_payload = next(p for m, p in calls if m == "crm.lead.add")
+        assert add_payload["fields"]["STATUS_ID"] == "NEWPOSEVENTO"
+        assert add_payload["fields"]["UF_PRESENTE"] == "ID-Não Presente"
+
+    def test_lead_novo_pra_evento_futuro_fica_em_inscrito(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or "123")
+        monkeypatch.setattr(lead_sync_service, "resolve_assessor_and_origem", lambda cupom: (None, "Inscrito Desconhecido"))
+
+        stats = STATS()
+        participant = {"id": "1", "first_name": "Fulano", "last_name": "Teste"}
+        lead_sync_service.create_lead_from_participant(
+            participant, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, self._base_field_config(), "", {}, [],
+            event_already_happened=False, force=True, checked_in=False,
+        )
+
+        add_payload = next(p for m, p in calls if m == "crm.lead.add")
+        assert add_payload["fields"]["STATUS_ID"] == "NEWINSCRITO"
+        assert "UF_PRESENTE" not in add_payload["fields"]

@@ -12,6 +12,7 @@ from common import (
     FIELD_FILTRAR_EVENTO,
     FIELD_NOME_DO_EVENTO,
     FIELD_SYMPLA_EVENT_ID,
+    LEAD_CLOSED_STAGES,
     STAGE_INSCRITO_PRO_EVENTO,
     STAGES_SAFE_TO_ADVANCE,
 )
@@ -63,3 +64,22 @@ def build_fields_to_advance(
     if field_filtrar_evento and filtrar_evento_id and (force or lead.get(field_filtrar_evento) != filtrar_evento_id):
         fields[field_filtrar_evento] = filtrar_evento_id
     return fields
+
+
+def deve_mover_pos_evento(status_atual: str | None, event_already_happened: bool, force: bool) -> bool:
+    """Decide se um Lead deve ser movido pra "Pós Evento" (com "Presente no
+    evento" preenchido junto — ver services/lead_sync_service.py) — só
+    quando "Forçar atualização de campos" é usado (force=True) num evento
+    que já aconteceu.
+
+    Diferente de build_fields_to_advance (que nunca promove um Lead de
+    funil antigo sozinho), esta transição vale pra QUALQUER Lead aberto,
+    funil novo ou antigo — decisão deliberada: o robô nativo do Bitrix que
+    fazia essa transição foi desligado, então sem isso os Leads do funil
+    antigo ficariam presos pra sempre sem "Presente no evento" preenchido.
+
+    Só não mexe em Lead já fechado (Ganho/Perdido, LEAD_CLOSED_STAGES) —
+    aí a decisão já foi tomada por um humano e não é hora de reabrir."""
+    if not (force and event_already_happened):
+        return False
+    return status_atual not in LEAD_CLOSED_STAGES

@@ -1,8 +1,7 @@
 """
 Funções puras de normalização/extração de dados — zero chamada de rede.
-Usadas tanto pela Automação A (matching, criação de lead) quanto pela
-Automação B (matching de presença), e testáveis isoladamente sem precisar
-de nenhuma credencial.
+Usadas pelo motor de sincronização (matching, criação de lead) e
+testáveis isoladamente sem precisar de nenhuma credencial.
 """
 
 import logging

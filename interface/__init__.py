@@ -1,9 +1,9 @@
 """
-Painel administrativo: Dashboard/Eventos/Mapeamento/Cupons/Logs. Processo
-Flask SEPARADO de automacao_b_presenca.py — nunca registrado como
-Blueprint dentro dele (diferente do que a branch abandonada
-feature/interface fazia). Só importa de common/domain/services/
-repositories, nunca o inverso.
+Painel administrativo: Dashboard/Eventos/Mapeamento/Cupons/Logs/
+Verificação de Duplicados. Processo Flask próprio (diferente do que a
+branch abandonada feature/interface fazia, que registrava tudo junto num
+único processo). Só importa de common/domain/services/repositories,
+nunca o inverso.
 """
 
 import logging

@@ -1,7 +1,6 @@
 """
 Ponto de entrada do painel administrativo (Dashboard/Eventos/Mapeamento/
-Cupons/Logs) — processo Flask SEPARADO de automacao_b_presenca.py, nunca
-registrado dentro dele.
+Cupons/Logs/Verificação de Duplicados).
 
 Uso local:
     flask --app interface_app run --port 5002

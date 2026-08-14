@@ -1,5 +1,5 @@
 """
-Configuração e constantes compartilhadas entre Automação A e Automação B:
+Configuração e constantes do motor de sincronização e do painel:
 credenciais das APIs, códigos de campo do Bitrix24 e os textos fixos usados
 nos campos de lista (enumeration).
 """
@@ -24,6 +24,12 @@ SYMPLA_BASE = "https://api.sympla.com.br/public/v1.5.1"
 STAGE_INSCRITO_PRO_EVENTO = os.environ.get("BITRIX_STAGE_INSCRITO_PRO_EVENTO", "UC_2CK7JY")
 STAGES_SAFE_TO_ADVANCE = {"NEWLEAD", "NEWFUP"}
 
+# Estágio "Pós Evento" — pra onde o botão "Forçar atualização de campos"
+# move o Lead (com "Presente no evento" já preenchido) quando o evento já
+# passou. Antes era um robô nativo do Bitrix quem fazia essa transição;
+# ver domain/stage_rules.py::deve_mover_pos_evento.
+STAGE_POS_EVENTO = os.environ.get("BITRIX_STAGE_POS_EVENTO", "NEWPOSEVENTO")
+
 # Estágios do funil antigo (pré-reformulação do pipeline) — um Lead nesses
 # estágios pode ganhar os campos de evento (Data/Nome/ID Sympla) quando
 # bate uma inscrição nova, pra dar visibilidade, mas o STATUS_ID nunca
@@ -31,6 +37,11 @@ STAGES_SAFE_TO_ADVANCE = {"NEWLEAD", "NEWFUP"}
 # Note que UC_TJ9FPC ("Reunião") NÃO entra aqui apesar de não ter o
 # prefixo [NEW]: é do funil novo.
 OLD_FUNNEL_STAGES = {"NEW", "IN_PROCESS", "PROCESSED", "UC_DQZKWD", "UC_PFVCRN", "UC_Z0M384", "UC_VL3WIF"}
+
+# Estágios "fechados" — um Lead nesses estágios não conta como "aberto no
+# funil" pra nenhuma automação: nem pra decidir se um Contato precisa de
+# Lead novo, nem pra decidir se um Lead pode ser movido pra "Pós Evento".
+LEAD_CLOSED_STAGES = {"CONVERTED", "JUNK"}
 
 FIELD_DATA_DO_EVENTO = os.environ.get("BITRIX_FIELD_DATA_DO_EVENTO", "")
 FIELD_NOME_DO_EVENTO = os.environ.get("BITRIX_FIELD_NOME_DO_EVENTO", "")

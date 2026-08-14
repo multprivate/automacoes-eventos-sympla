@@ -1,7 +1,7 @@
 """
-Código compartilhado entre as duas automações (inscrição e presença):
-chamadas à API do Bitrix24, chamadas à API da Sympla, e as funções de
-normalização/matching usadas pelas duas pontas.
+Código compartilhado entre o motor de sincronização (services/) e o painel
+administrativo (interface/): chamadas à API do Bitrix24, chamadas à API da
+Sympla, e as funções de normalização/matching.
 
 Este pacote substitui o antigo common.py de arquivo único, dividido por
 responsabilidade (bitrix_client / sympla_client / normalization /
@@ -26,7 +26,6 @@ from .bitrix_client import (
 from .bitrix_spa_client import (
     add_item as spa_add_item,
     find_item_by_sympla_event_id as spa_find_item_by_sympla_event_id,
-    get_item as spa_get_item,
     update_item as spa_update_item,
 )
 from .constants import (
@@ -46,12 +45,14 @@ from .constants import (
     FIELD_SPA_TOTAL_PRESENTES,
     FIELD_SPA_ULTIMA_SINCRONIZACAO,
     FIELD_SYMPLA_EVENT_ID,
+    LEAD_CLOSED_STAGES,
     OLD_FUNNEL_STAGES,
     ORIGEM_VALOR_CUPOM_DESCONTO,
     ORIGEM_VALOR_FORMULARIO,
     ORIGEM_VALOR_INSCRITO_DESCONHECIDO,
     ORIGEM_VALOR_TRAFEGO_PAGO,
     STAGE_INSCRITO_PRO_EVENTO,
+    STAGE_POS_EVENTO,
     STAGES_SAFE_TO_ADVANCE,
     SYMPLA_BASE,
     SYMPLA_TOKEN,
@@ -92,7 +93,6 @@ __all__ = [
     "resolve_user_id_by_email",
     "spa_add_item",
     "spa_find_item_by_sympla_event_id",
-    "spa_get_item",
     "spa_update_item",
     "_merge_enum_items",
     "BITRIX_PORTAL_URL",
@@ -111,12 +111,14 @@ __all__ = [
     "FIELD_SPA_TOTAL_PRESENTES",
     "FIELD_SPA_ULTIMA_SINCRONIZACAO",
     "FIELD_SYMPLA_EVENT_ID",
+    "LEAD_CLOSED_STAGES",
     "OLD_FUNNEL_STAGES",
     "ORIGEM_VALOR_CUPOM_DESCONTO",
     "ORIGEM_VALOR_FORMULARIO",
     "ORIGEM_VALOR_INSCRITO_DESCONHECIDO",
     "ORIGEM_VALOR_TRAFEGO_PAGO",
     "STAGE_INSCRITO_PRO_EVENTO",
+    "STAGE_POS_EVENTO",
     "STAGES_SAFE_TO_ADVANCE",
     "SYMPLA_BASE",
     "SYMPLA_TOKEN",
