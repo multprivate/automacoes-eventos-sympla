@@ -1,26 +1,6 @@
 services:
-  # Automação B (presença) — existente, INTOCADO. Continua exatamente como
-  # estava; os dois serviços novos abaixo nunca importam nada dela nem são
-  # importados por ela.
-  - type: web
-    name: automacao-b-presenca
-    runtime: python
-    plan: free
-    buildCommand: pip install -r requirements.txt
-    startCommand: gunicorn automacao_b_presenca:app --bind 0.0.0.0:$PORT
-    healthCheckPath: /health
-    envVars:
-      - key: SYMPLA_TOKEN
-        sync: false
-      - key: BITRIX_WEBHOOK_URL
-        sync: false
-      - key: BITRIX_FIELD_SYMPLA_EVENT_ID
-        sync: false
-      - key: BITRIX_FIELD_PRESENTE_NO_EVENTO
-        sync: false
-
-  # Painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs) —
-  # processo Flask separado, nunca registrado dentro do serviço acima.
+  # Painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs/
+  # Verificação de Duplicados) — processo Flask separado.
   - type: web
     name: sympla-dashboard
     runtime: python
@@ -44,6 +24,10 @@ services:
       - key: BITRIX_FIELD_ORIGEM
         sync: false
       - key: BITRIX_FIELD_FILTRAR_EVENTO
+        sync: false
+      - key: BITRIX_FIELD_PRESENTE_NO_EVENTO
+        sync: false
+      - key: BITRIX_STAGE_POS_EVENTO
         sync: false
       - key: SUPABASE_URL
         sync: false

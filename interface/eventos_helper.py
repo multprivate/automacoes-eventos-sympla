@@ -49,10 +49,6 @@ def list_all_events_view() -> list[dict]:
                 "ultimo_sync": row.get("ultimo_sync_em"),
                 "ativo": row.get("ativo", True),
                 "removido": bool(row.get("removido_em")),
-                # sync_one_event() só sabe processar eventos que ainda estão
-                # em list_upcoming_events() — um evento já passado não pode
-                # usar os botões "Sincronizar agora"/"Forçar campos".
-                "sincronizavel": event_id in upcoming_by_id,
             }
         )
 
@@ -69,7 +65,6 @@ def list_all_events_view() -> list[dict]:
                 "ultimo_sync": None,
                 "ativo": True,
                 "removido": False,
-                "sincronizavel": True,
             }
         )
 

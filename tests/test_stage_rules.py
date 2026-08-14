@@ -5,7 +5,7 @@ from common import (
     STAGE_INSCRITO_PRO_EVENTO,
     STAGES_SAFE_TO_ADVANCE,
 )
-from domain.stage_rules import build_fields_to_advance
+from domain.stage_rules import build_fields_to_advance, deve_mover_pos_evento
 
 EVENT_NAME = "Workshop Teste"
 EVENT_DATE = "2026-03-04"
@@ -98,3 +98,30 @@ def test_field_config_dinamico_via_keyword_override():
     assert fields.get("STATUS_ID") == "OUTRO_ESTAGIO"
     assert fields.get("UF_CRM_OUTRO_CAMPO") == EVENT_DATE
     assert FIELD_DATA_DO_EVENTO not in fields
+
+
+class TestDeveMoverPosEvento:
+    def test_evento_passado_e_force_move(self):
+        assert deve_mover_pos_evento("NEWINSCRITO", event_already_happened=True, force=True) is True
+
+    def test_evento_passado_mas_sem_force_nao_move(self):
+        assert deve_mover_pos_evento("NEWINSCRITO", event_already_happened=True, force=False) is False
+
+    def test_force_mas_evento_nao_passou_nao_move(self):
+        assert deve_mover_pos_evento("NEWINSCRITO", event_already_happened=False, force=True) is False
+
+    def test_lead_ganho_nao_move(self):
+        assert deve_mover_pos_evento("CONVERTED", event_already_happened=True, force=True) is False
+
+    def test_lead_perdido_nao_move(self):
+        assert deve_mover_pos_evento("JUNK", event_already_happened=True, force=True) is False
+
+    def test_lead_de_funil_antigo_move(self):
+        """Diferente de build_fields_to_advance, esta transição vale pra
+        funil antigo também — decisão deliberada (ver docstring)."""
+        assert deve_mover_pos_evento("UC_Z0M384", event_already_happened=True, force=True) is True
+
+    def test_lead_novo_sem_status_ainda_move(self):
+        """Lead recém-criado (status_atual=None, ainda não existe no
+        Bitrix) também deve poder nascer direto em Pós Evento."""
+        assert deve_mover_pos_evento(None, event_already_happened=True, force=True) is True

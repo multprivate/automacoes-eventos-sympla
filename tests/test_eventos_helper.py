@@ -30,15 +30,13 @@ def test_uniao_de_evento_ja_sincronizado_com_futuro_novo(monkeypatch):
     assert ids == {"evt_passado", "evt_futuro_novo"}
 
     passado = next(e for e in view if e["id"] == "evt_passado")
-    assert passado["sincronizavel"] is False
     assert passado["inscritos"] == 5
 
     novo = next(e for e in view if e["id"] == "evt_futuro_novo")
-    assert novo["sincronizavel"] is True
     assert novo["ultimo_sync"] is None
 
 
-def test_evento_ja_sincronizado_e_ainda_futuro_fica_sincronizavel(monkeypatch):
+def test_evento_ja_sincronizado_e_ainda_futuro_usa_nome_fresco_da_sympla(monkeypatch):
     monkeypatch.setattr(
         eventos_helper.eventos_config_repo,
         "get_all",
@@ -64,5 +62,4 @@ def test_evento_ja_sincronizado_e_ainda_futuro_fica_sincronizavel(monkeypatch):
     view = eventos_helper.list_all_events_view()
 
     assert len(view) == 1
-    assert view[0]["sincronizavel"] is True
     assert view[0]["nome"] == "Nome Novo Vindo da Sympla"

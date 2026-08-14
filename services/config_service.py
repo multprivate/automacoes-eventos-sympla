@@ -1,14 +1,12 @@
 """
 Resolve os códigos de campo/estágio do Bitrix (FIELD_DATA_DO_EVENTO,
 FIELD_NOME_DO_EVENTO, FIELD_SYMPLA_EVENT_ID, FIELD_ORIGEM,
-STAGE_INSCRITO_PRO_EVENTO) consultando a tabela `config_kv` no Supabase,
-com fallback pros valores fixos de common/constants.py (hoje vindos do
-.env) quando o Supabase não está configurado, fora do ar, ou sem a chave.
+FIELD_PRESENTE_NO_EVENTO, STAGE_INSCRITO_PRO_EVENTO, STAGE_POS_EVENTO)
+consultando a tabela `config_kv` no Supabase, com fallback pros valores
+fixos de common/constants.py (hoje vindos do .env) quando o Supabase não
+está configurado, fora do ar, ou sem a chave.
 
-Só services/lead_sync_service.py e o painel (interface/) chamam isto —
-automacao_b_presenca.py continua importando de common diretamente, sem
-nenhuma linha alterada nele (essa camada fica ACIMA de common/constants.py,
-nunca dentro).
+Só services/lead_sync_service.py e o painel (interface/) chamam isto.
 
 Mesmo padrão de cache/fallback já usado em services/coupon_service.py.
 """
@@ -21,8 +19,10 @@ from common import (
     FIELD_FILTRAR_EVENTO,
     FIELD_NOME_DO_EVENTO,
     FIELD_ORIGEM,
+    FIELD_PRESENTE_NO_EVENTO,
     FIELD_SYMPLA_EVENT_ID,
     STAGE_INSCRITO_PRO_EVENTO,
+    STAGE_POS_EVENTO,
 )
 from repositories import config_repo
 from repositories.supabase_client import SupabaseUnavailable
@@ -37,7 +37,9 @@ _DEFAULTS = {
     "FIELD_SYMPLA_EVENT_ID": FIELD_SYMPLA_EVENT_ID,
     "FIELD_ORIGEM": FIELD_ORIGEM,
     "FIELD_FILTRAR_EVENTO": FIELD_FILTRAR_EVENTO,
+    "FIELD_PRESENTE_NO_EVENTO": FIELD_PRESENTE_NO_EVENTO,
     "STAGE_INSCRITO_PRO_EVENTO": STAGE_INSCRITO_PRO_EVENTO,
+    "STAGE_POS_EVENTO": STAGE_POS_EVENTO,
 }
 
 _cache: dict[str, str] | None = None
@@ -87,5 +89,13 @@ def get_field_filtrar_evento() -> str:
     return load_config()["FIELD_FILTRAR_EVENTO"]
 
 
+def get_field_presente_no_evento() -> str:
+    return load_config()["FIELD_PRESENTE_NO_EVENTO"]
+
+
 def get_stage_inscrito_pro_evento() -> str:
     return load_config()["STAGE_INSCRITO_PRO_EVENTO"]
+
+
+def get_stage_pos_evento() -> str:
+    return load_config()["STAGE_POS_EVENTO"]

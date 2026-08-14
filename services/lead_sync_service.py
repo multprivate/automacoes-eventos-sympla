@@ -22,7 +22,7 @@ rodar quantas vezes quiser.
 
 import logging
 import time
-from datetime import datetime, timezone
+from datetime import date, datetime, timezone
 
 from common import (
     bitrix_call,
@@ -38,6 +38,7 @@ from common import (
     format_event_label,
     format_phone_br,
     extract_phone,
+    get_all_events,
     get_lead,
     get_sympla_all_orders,
     get_sympla_all_participants,
@@ -57,7 +58,10 @@ from common import (
     FIELD_SPA_TOTAL_INSCRITOS,
     FIELD_SPA_TOTAL_PRESENTES,
     FIELD_SPA_ULTIMA_SINCRONIZACAO,
+    LEAD_CLOSED_STAGES,
     OLD_FUNNEL_STAGES,
+    VALOR_NAO_PRESENTE,
+    VALOR_PRESENTE,
 )
 from domain.campo_extra_mapeamento import resolve_extra_fields
 from domain.matching import (
@@ -66,16 +70,11 @@ from domain.matching import (
     find_matching_contact_ids as _find_matching_contact_ids,
     find_matching_lead_ids as _find_matching_lead_ids,
 )
-from domain.stage_rules import build_fields_to_advance
+from domain.stage_rules import build_fields_to_advance, deve_mover_pos_evento
 from repositories import eventos_config_repo, logs_repo, processed_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
 from services import campo_mapeamento_service, config_service
 from services.coupon_service import resolve_assessor_and_origem
-
-# Estágios "fechados" padrão do Bitrix — um Lead nesses estágios não conta
-# como "aberto no funil" pra decidir se um cliente (Contato) precisa de um
-# Lead novo representando o interesse no evento.
-LEAD_CLOSED_STAGES = {"CONVERTED", "JUNK"}
 
 log = logging.getLogger("services.lead_sync_service")
 
@@ -95,7 +94,9 @@ def _resolve_field_config() -> dict:
         "field_sympla_event_id": config_service.get_field_sympla_event_id(),
         "field_filtrar_evento": config_service.get_field_filtrar_evento(),
         "field_origem": config_service.get_field_origem(),
+        "field_presente_no_evento": config_service.get_field_presente_no_evento(),
         "stage_alvo": config_service.get_stage_inscrito_pro_evento(),
+        "stage_pos_evento": config_service.get_stage_pos_evento(),
     }
 
 
@@ -204,12 +205,36 @@ def build_cupom_map_loader(event_id: str):
     return get
 
 
-def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None) -> int:
+def _aplicar_pos_evento(fields: dict, status_atual: str | None, event_already_happened: bool, force: bool, checked_in: bool, field_config: dict) -> None:
+    """Mutação em `fields` (in place): se deve_mover_pos_evento() disser que
+    sim, adiciona STATUS_ID=stage_pos_evento e, se o campo estiver
+    configurado, "Presente no evento" (Presente/Não Presente conforme
+    check-in real da Sympla) — substitui a Automação B (aposentada), que
+    fazia isso reagindo a um robô nativo do Bitrix que não existe mais.
+
+    Fica em lead_sync_service.py (não em domain/stage_rules.py, que só tem
+    deve_mover_pos_evento) porque resolve_enum_id faz chamada de rede —
+    domain/ é sempre puro."""
+    if not deve_mover_pos_evento(status_atual, event_already_happened, force):
+        return
+    fields["STATUS_ID"] = field_config["stage_pos_evento"]
+    if field_config["field_presente_no_evento"]:
+        valor_texto = VALOR_PRESENTE if checked_in else VALOR_NAO_PRESENTE
+        fields[field_config["field_presente_no_evento"]] = resolve_enum_id(field_config["field_presente_no_evento"], valor_texto)
+
+
+def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None, event_already_happened: bool = False, force: bool = False, checked_in: bool = False) -> int:
     """Cria um Lead novo. contact_id/item_id são usados no branch "cliente"
     (Contato já existente sem Lead aberto no funil): mesma lógica de
     cupom→assessor/origem de sempre também se aplica aqui — decisão
     confirmada com o usuário, um cliente que se inscreve com cupom de um
-    assessor ainda deve gerar essa atribuição. Retorna o ID do Lead criado."""
+    assessor ainda deve gerar essa atribuição. Retorna o ID do Lead criado.
+
+    event_already_happened/force/checked_in: se o evento já passou e é uma
+    sincronização forçada, o Lead já nasce em "Pós Evento" com presença
+    preenchida em vez de passar primeiro por "Inscrito Pro Evento" (ver
+    _aplicar_pos_evento) — não faz sentido fingir que o evento ainda vai
+    acontecer pra um Lead criado hoje sobre um evento do passado."""
     name = participant_full_name(participant)
     assessor_email, origem_valor = resolve_assessor_and_origem(cupom)
 
@@ -238,6 +263,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     if item_id:
         fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
     fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=None))
+    _aplicar_pos_evento(fields, None, event_already_happened, force, checked_in, field_config)
 
     new_id = bitrix_call("crm.lead.add", {"fields": fields})
     stats["leads_criados"] += 1
@@ -246,7 +272,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     return int(new_id)
 
 
-def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool) -> None:
+def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool) -> None:
     """Branch "cliente": o inscrito bateu com um Contato já existente.
     Vincula o Contato ao item do evento; se o Contato não tem nenhum Lead
     aberto no funil, cria um Lead novo (mesma lógica de cupom→assessor de
@@ -287,19 +313,22 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
                 stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
                 contact_id=contact_id, item_id=item_id,
+                event_already_happened=event_already_happened, force=force, checked_in=checked_in,
             )
         else:
             for lead_id in open_lead_ids:
-                if not item_id:
-                    continue
                 lead = get_lead(lead_id)
-                if force or not _already_linked_to_item(lead, item_id):
-                    bitrix_call("crm.lead.update", {"id": lead_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
+                fields = {}
+                if item_id and (force or not _already_linked_to_item(lead, item_id)):
+                    fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+                _aplicar_pos_evento(fields, lead.get("STATUS_ID"), event_already_happened, force, checked_in, field_config)
+                if fields:
+                    bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
-                    log.info("Lead %s (cliente já com Lead aberto) vinculado ao evento %s (item %s).", lead_id, event_name, item_id)
+                    log.info("Lead %s (cliente já com Lead aberto) atualizado (evento %s, item %s): %s", lead_id, event_name, item_id, fields)
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False) -> bool:
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False, event_already_happened: bool = False) -> bool:
     """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
     ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
     errado e precisa ser tentado de novo na próxima execução. Só entra na
@@ -308,8 +337,12 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     pra sempre.
 
     force=True ("Forçar atualização de campos" no painel) reenvia os campos
-    de evento mesmo que já estejam iguais — não afeta a lógica de STATUS_ID
-    nem a defesa de funil antigo, só os campos de data/nome/id do evento.
+    de evento mesmo que já estejam iguais — não afeta a lógica normal de
+    STATUS_ID nem a defesa de funil antigo, só os campos de data/nome/id do
+    evento. A ÚNICA exceção é quando o evento já passou (event_already_happened):
+    aí, force=True TAMBÉM move o Lead pra "Pós Evento" com "Presente no
+    evento" preenchido, mesmo os de funil antigo — ver
+    domain/stage_rules.py::deve_mover_pos_evento e _aplicar_pos_evento.
 
     item_id (id do item na SPA "Eventos Sympla") é resolvido uma vez por
     evento em process_event() — pode ser None se a SPA estiver indisponível
@@ -323,6 +356,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     email = participant.get("email") or ""
     full_name = participant_full_name(participant)
     cupom = extract_discount_code(participant, get_cupom_map)
+    checked_in = bool((participant.get("checkin") or {}).get("check_in_date"))
     valores_disponiveis = {
         "cupom_desconto": cupom,
         "telefone": phone_key,
@@ -340,7 +374,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
 
     if contact_ids:
         try:
-            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force)
+            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, event_already_happened, checked_in)
             return True
         except Exception as exc:
             log.error("Falha ao processar cliente (contato) pro inscrito %s: %s", participant.get("id"), exc)
@@ -371,11 +405,13 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                     # Defesa explícita: funil antigo pode ganhar os campos
                     # do evento (visibilidade de que se inscreveu de novo),
                     # mas o estágio nunca muda — mesmo que build_fields_to_advance
-                    # mude de regra no futuro.
+                    # mude de regra no futuro. _aplicar_pos_evento (abaixo) é
+                    # a ÚNICA exceção deliberada a essa defesa.
                     fields.pop("STATUS_ID", None)
                 fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=lead, force=force))
                 if item_id and (force or not _already_linked_to_item(lead, item_id)):
                     fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+                _aplicar_pos_evento(fields, lead.get("STATUS_ID"), event_already_happened, force, checked_in, field_config)
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
@@ -384,7 +420,10 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
         elif phone_key:
-            create_lead_from_participant(participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id)
+            create_lead_from_participant(
+                participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id,
+                event_already_happened=event_already_happened, force=force, checked_in=checked_in,
+            )
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
         return True
@@ -410,10 +449,16 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
 
     Cada chamada grava uma linha em execucoes_log_itens (aba Logs do
     painel) — melhor esforço, uma falha ao logar nunca bloqueia a
-    sincronização de verdade."""
+    sincronização de verdade.
+
+    event_already_happened (evento já passou) é calculado uma vez aqui e
+    repassado pra process_participant — junto com force=True, é o gatilho
+    pra mover Leads pra "Pós Evento" com presença preenchida (ver
+    domain/stage_rules.py::deve_mover_pos_evento)."""
     event_id = event["id"]
     event_name = event.get("name", "")
     event_date = (event.get("start_date") or "")[:10]  # YYYY-MM-DD
+    event_already_happened = bool(event_date) and event_date < date.today().isoformat()
     acao = "EVENT_FIELDS_FORCED" if force else "EVENT_SYNCED"
     inicio = time.monotonic()
 
@@ -470,7 +515,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
     newly_done = {
         str(participant.get("id"))
         for participant in participants_to_process
-        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force)
+        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force, event_already_happened=event_already_happened)
     }
 
     if not newly_done:
@@ -559,12 +604,18 @@ def sync_one_event(event_id: str, force: bool = False) -> dict:
     """Sincroniza um evento só, sob demanda — usado pelo painel
     ("Sincronizar agora" com force=False, "Forçar atualização de campos"
     com force=True). Também grava um resumo em execucoes_log, mesmo espírito
-    de sync_all_upcoming_events."""
+    de sync_all_upcoming_events().
+
+    Usa get_all_events() (todo evento do organizador, passado ou futuro),
+    não list_upcoming_events() — diferente do Cron Job (que só processa
+    eventos futuros), aqui é uma ação explícita do painel sobre um evento
+    específico, e "Forçar campos" precisa funcionar em evento já passado
+    (é exatamente quando ele preenche presença e move pra Pós Evento)."""
     iniciado_em = datetime.now(timezone.utc)
-    events = list_upcoming_events()
+    events = get_all_events()
     event = next((e for e in events if e["id"] == event_id), None)
     if event is None:
-        raise ValueError(f"Evento {event_id} não encontrado entre os eventos próximos da Sympla.")
+        raise ValueError(f"Evento {event_id} não encontrado na Sympla.")
 
     stats = _new_stats()
     stats["eventos_processados"] = 1

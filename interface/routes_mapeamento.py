@@ -2,9 +2,7 @@
 Aba Mapeamento: edição dos códigos de campo/estágio do Bitrix
 (config_kv), com o mesmo padrão dual-read-com-fallback já usado em
 Cupons. Só as chaves que services/config_service.py de fato consome
-(usadas pelo motor de sincronização) aparecem aqui — FIELD_PRESENTE_NO_EVENTO
-é da Automação B, que continua lendo direto do .env/secrets do próprio
-serviço, e editar aqui não teria efeito nenhum sobre ela.
+(usadas pelo motor de sincronização) aparecem aqui.
 
 Também expõe os mapeamentos extras (mapeamentos_campos): vincular um dado
 que o motor já extrai do participante (cupom, telefone, nome, e-mail) a
@@ -32,7 +30,9 @@ _DESCRICOES = {
     "FIELD_SYMPLA_EVENT_ID": "Código do campo customizado com o ID interno do evento Sympla",
     "FIELD_ORIGEM": 'Código do campo customizado "Origem"',
     "FIELD_FILTRAR_EVENTO": 'Código do campo customizado "Filtrar Evento"',
+    "FIELD_PRESENTE_NO_EVENTO": 'Código do campo customizado "Presente no evento"',
     "STAGE_INSCRITO_PRO_EVENTO": 'Código do estágio "Inscrito Pro Evento" no funil de Leads',
+    "STAGE_POS_EVENTO": 'Código do estágio "Pós Evento" no funil de Leads',
 }
 
 

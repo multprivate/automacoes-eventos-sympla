@@ -16,11 +16,10 @@ arriscada demais.
 
 import logging
 
-from common import bitrix_call, bitrix_list_all, get_lead, normalize_phone_suffix
+from common import LEAD_CLOSED_STAGES, bitrix_call, bitrix_list_all, get_lead, normalize_phone_suffix
 from common.constants import FIELD_PARENT_ID_EVENTO_SPA
 from domain.matching import choose_primary_lead_id
 from repositories import duplicados_repo
-from services.lead_sync_service import LEAD_CLOSED_STAGES
 
 log = logging.getLogger("services.duplicidade_service")
 
