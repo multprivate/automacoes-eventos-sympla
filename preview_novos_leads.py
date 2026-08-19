@@ -17,6 +17,17 @@ Uso:
 
 import logging
 import os
+import sys
+
+try:
+    # Console do Windows (cmd/PowerShell legado) costuma vir em cp1252, que
+    # não tem ✓/⚠ — sem isso o script quebra no meio da varredura assim que
+    # imprime o primeiro caractere fora da tabela, mesmo sem nenhum erro de
+    # negócio. reconfigure() é Python 3.7+; sys.stdout pode não suportar em
+    # ambientes exóticos (ex: capturado por outra ferramenta), daí o guard.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 from domain.matching import choose_primary_contact_id
 from services.lead_sync_service import (
