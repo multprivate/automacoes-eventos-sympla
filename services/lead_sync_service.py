@@ -66,7 +66,7 @@ from common import (
 from domain.campo_extra_mapeamento import resolve_extra_fields
 from domain.matching import (
     choose_primary_contact_id,
-    contact_needs_new_lead,
+    contact_needs_new_event_lead,
     find_matching_contact_ids as _find_matching_contact_ids,
     find_matching_lead_ids as _find_matching_lead_ids,
 )
@@ -130,6 +130,7 @@ def find_matching_lead_ids(phone_key: str, email: str, full_name: str) -> tuple[
         lookup_by_phone=find_lead_ids_by_phone,
         lookup_by_email=find_lead_ids_by_email,
         lookup_by_name=find_lead_ids_by_name,
+        get_lead_name=lambda lead_id: (get_lead(lead_id) or {}).get("NAME", ""),
     )
 
 
@@ -154,6 +155,20 @@ def _already_linked_to_item(entity: dict, item_id: int) -> bool:
 def _find_open_lead_ids_for_contact(contact_id: int) -> list[int]:
     leads = bitrix_list_all("crm.lead.list", {"filter": {"CONTACT_ID": contact_id}, "select": ["ID", "STATUS_ID"]})
     return [int(lead["ID"]) for lead in leads if lead.get("STATUS_ID") not in LEAD_CLOSED_STAGES]
+
+
+def _find_lead_ids_for_contact_linked_to_event(contact_id: int, item_id: int) -> list[int]:
+    """Leads do Contato já vinculados a ESTE evento (item da SPA) — usado
+    pra decidir se a inscrição já gerou um Lead antes (idempotência sob
+    "Forçar atualização de campos", que reprocessa todo mundo). Não
+    exclui LEAD_CLOSED_STAGES de propósito: mesmo que o Lead do evento já
+    tenha sido fechado (Ganho/Perdido) numa rodada anterior, um rerun não
+    deve criar um segundo Lead pra mesma inscrição."""
+    leads = bitrix_list_all(
+        "crm.lead.list",
+        {"filter": {"CONTACT_ID": contact_id, FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID"]},
+    )
+    return [int(lead["ID"]) for lead in leads]
 
 
 def _find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date: str, inscritos_count: int, presentes_count: int) -> int | None:
@@ -225,10 +240,11 @@ def _aplicar_pos_evento(fields: dict, status_atual: str | None, event_already_ha
 
 def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None, event_already_happened: bool = False, force: bool = False, checked_in: bool = False) -> int:
     """Cria um Lead novo. contact_id/item_id são usados no branch "cliente"
-    (Contato já existente sem Lead aberto no funil): mesma lógica de
-    cupom→assessor/origem de sempre também se aplica aqui — decisão
-    confirmada com o usuário, um cliente que se inscreve com cupom de um
-    assessor ainda deve gerar essa atribuição. Retorna o ID do Lead criado.
+    (Contato já existente que ainda não tem Lead vinculado a este evento):
+    mesma lógica de cupom→assessor/origem de sempre também se aplica aqui —
+    decisão confirmada com o usuário, um cliente que se inscreve com cupom
+    de um assessor ainda deve gerar essa atribuição. Retorna o ID do Lead
+    criado.
 
     event_already_happened/force/checked_in: se o evento já passou e é uma
     sincronização forçada, o Lead já nasce em "Pós Evento" com presença
@@ -274,11 +290,15 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
 
 def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool) -> None:
     """Branch "cliente": o inscrito bateu com um Contato já existente.
-    Vincula o Contato ao item do evento; se o Contato não tem nenhum Lead
-    aberto no funil, cria um Lead novo (mesma lógica de cupom→assessor de
-    sempre); se já tem, só garante que esse(s) Lead(s) também fiquem
-    vinculados ao evento — não mexe em estágio/responsável de um Lead que
-    já existia.
+    Vincula o Contato ao item do evento; se esse Contato ainda não tem
+    nenhum Lead vinculado a ESTE evento, cria um Lead novo em "Inscrito Pro
+    Evento" (mesma lógica de cupom→assessor de sempre) — mesmo que o
+    Contato já tenha outro Lead aberto em outro estágio (negociação em
+    andamento, funil antigo etc.): esse Lead paralelo nunca é tocado, regra
+    de negócio confirmada é que todo cliente inscrito precisa aparecer com
+    card próprio em Inscrito Pro Evento. Se o Lead deste evento já existe
+    (rerun via "Forçar atualização de campos"), só atualiza/vincula esse(s)
+    Lead(s) — não cria de novo.
 
     Se bater com MAIS de um Contato (dado duplicado pré-existente no
     Bitrix — mesmo e-mail/telefone em dois registros — não causado pela
@@ -307,8 +327,8 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
             bitrix_call("crm.contact.update", {"id": contact_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
             log.info("Contato %s vinculado ao evento %s (item %s).", contact_id, event_name, item_id)
 
-        open_lead_ids = _find_open_lead_ids_for_contact(contact_id)
-        if contact_needs_new_lead(open_lead_ids):
+        existing_event_lead_ids = _find_lead_ids_for_contact_linked_to_event(contact_id, item_id) if item_id else []
+        if contact_needs_new_event_lead(existing_event_lead_ids):
             create_lead_from_participant(
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
                 stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
@@ -316,7 +336,7 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
                 event_already_happened=event_already_happened, force=force, checked_in=checked_in,
             )
         else:
-            for lead_id in open_lead_ids:
+            for lead_id in existing_event_lead_ids:
                 lead = get_lead(lead_id)
                 fields = {}
                 if item_id and (force or not _already_linked_to_item(lead, item_id)):
@@ -325,7 +345,7 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
-                    log.info("Lead %s (cliente já com Lead aberto) atualizado (evento %s, item %s): %s", lead_id, event_name, item_id, fields)
+                    log.info("Lead %s (cliente, Lead do evento já existia) atualizado (evento %s, item %s): %s", lead_id, event_name, item_id, fields)
 
 
 def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False, event_already_happened: bool = False) -> bool:

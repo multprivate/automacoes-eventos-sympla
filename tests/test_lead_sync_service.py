@@ -40,15 +40,39 @@ def test_falha_ao_ler_eventos_config_e_fail_aberto(monkeypatch):
     assert result == events
 
 
+class TestFindMatchingLeadIdsWrapper:
+    def test_email_bate_mas_nome_diverge_usa_get_lead_pra_confirmar_e_rejeita(self, monkeypatch):
+        """Reproduz o caso real do cupom em grupo (mesmo e-mail, inscritos
+        diferentes): a busca por e-mail acha um candidato, mas o nome dele
+        (resolvido via get_lead, um crm.lead.get de verdade) não bate com o
+        inscrito -> o wrapper rejeita e cai pro passo de busca por nome."""
+        get_lead_calls = []
+
+        def fake_get_lead(lead_id):
+            get_lead_calls.append(lead_id)
+            return {"ID": lead_id, "NAME": "Gabriel Prado"}
+
+        monkeypatch.setattr(lead_sync_service, "get_lead", fake_get_lead)
+        monkeypatch.setattr(lead_sync_service, "find_lead_ids_by_phone", lambda phone: [])
+        monkeypatch.setattr(lead_sync_service, "find_lead_ids_by_email", lambda email: [3])
+        monkeypatch.setattr(lead_sync_service, "find_lead_ids_by_name", lambda name: [])
+
+        ids, method = lead_sync_service.find_matching_lead_ids("", "rcparanegocios@gmail.com", "Natan Prado")
+
+        assert ids == []
+        assert method is None
+        assert get_lead_calls == [3]
+
+
 PARTICIPANT = {"id": "999"}
 STATS = lambda: {"eventos_processados": 0, "leads_criados": 0, "leads_atualizados": 0, "erros": 0}
 
 
 class TestProcessClienteParticipant:
-    def test_contato_sem_lead_aberto_cria_lead_novo(self, monkeypatch):
+    def test_contato_sem_lead_deste_evento_cria_lead_novo(self, monkeypatch):
         calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {} if method == "crm.contact.get" else calls.append((method, payload)))
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [])
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: calls.append(("create_lead", kw)))
 
         stats = STATS()
@@ -62,11 +86,15 @@ class TestProcessClienteParticipant:
         assert create_kwargs["contact_id"] == 42
         assert create_kwargs["item_id"] == 28
 
-    def test_contato_com_lead_aberto_so_vincula_nao_cria(self, monkeypatch):
+    def test_contato_com_lead_deste_evento_so_atualiza_nao_cria(self, monkeypatch):
+        """Regra de negócio: um Contato pode ter OUTRO Lead aberto em outro
+        estágio (negociação paralela) — isso não é mais consultado nem
+        impede a criação do Lead do evento. O que impede é só já existir um
+        Lead vinculado a ESTE evento."""
         calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id})
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo")))
 
         stats = STATS()
@@ -81,10 +109,60 @@ class TestProcessClienteParticipant:
         assert lead_update_calls[0]["fields"] == {lead_sync_service.FIELD_PARENT_ID_EVENTO_SPA: 28}
         assert stats["leads_atualizados"] == 1
 
+    def test_contato_com_lead_aberto_em_outro_estagio_ainda_assim_cria_lead_do_evento(self, monkeypatch):
+        """Trava a regra de negócio confirmada: um Lead de negociação
+        paralela do Contato (aberto em outro estágio, não vinculado a este
+        evento) NUNCA impede nem é tocado pela criação do Lead do evento."""
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {} if method == "crm.contact.get" else calls.append((method, payload)))
+        # Nenhum Lead vinculado a ESTE evento ainda, mesmo que o Contato
+        # tenha outro Lead aberto em algum lugar (não é mais consultado).
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [])
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: calls.append(("create_lead", kw)))
+
+        stats = STATS()
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
+        )
+
+        assert any(m == "create_lead" for m, _ in calls)
+        assert not any(method == "crm.lead.update" for method, _ in calls)
+
+    def test_force_rerun_nao_duplica_lead_do_evento(self, monkeypatch):
+        """Idempotência sob 'Forçar atualização de campos': reprocessar o
+        mesmo participante depois que o Lead do evento já existe atualiza
+        em vez de criar um segundo."""
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {} if method == "crm.contact.get" else calls.append((method, payload)))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id})
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: calls.append(("create_lead", kw)))
+
+        # 1ª rodada: ainda não existe Lead deste evento -> cria.
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [])
+        stats = STATS()
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, {}, "", {}, [], item_id=28, force=True, event_already_happened=False, checked_in=False,
+        )
+        assert sum(1 for m, _ in calls if m == "create_lead") == 1
+        assert not any(m == "crm.lead.update" for m, _ in calls)
+
+        # 2ª rodada (force rerun): já existe o Lead #999 deste evento -> só atualiza.
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [999])
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, {}, "", {}, [], item_id=28, force=True, event_already_happened=False, checked_in=False,
+        )
+        assert sum(1 for m, _ in calls if m == "create_lead") == 1
+        lead_update_calls = [payload for m, payload in calls if m == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert lead_update_calls[0]["id"] == 999
+
     def test_contato_ja_vinculado_ao_item_nao_reenvia(self, monkeypatch):
         calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {lead_sync_service.FIELD_PARENT_ID_EVENTO_SPA: 28})
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, lead_sync_service.FIELD_PARENT_ID_EVENTO_SPA: 28})
 
         stats = STATS()
@@ -100,7 +178,7 @@ class TestProcessClienteParticipant:
         create_calls = []
         log_calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {})
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [])
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: create_calls.append(kw))
         monkeypatch.setattr(lead_sync_service.logs_repo, "insert_item", lambda *a, **kw: log_calls.append((a, kw)))
 
@@ -280,13 +358,13 @@ class TestContatoComLeadAbertoPosEvento:
         calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "UC_Z0M384"})
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
         monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
 
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=None, force=True, event_already_happened=True, checked_in=True,
+            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=28, force=True, event_already_happened=True, checked_in=True,
         )
 
         lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
@@ -300,16 +378,52 @@ class TestContatoComLeadAbertoPosEvento:
         calls = []
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "UC_Z0M384"})
-        monkeypatch.setattr(lead_sync_service, "_find_open_lead_ids_for_contact", lambda contact_id: [777])
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
 
         stats = STATS()
         lead_sync_service._process_cliente_participant(
             [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
-            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=None, force=True, event_already_happened=False, checked_in=True,
+            stats, POS_EVENTO_FIELD_CONFIG, "", {}, [], item_id=28, force=True, event_already_happened=False, checked_in=True,
         )
 
-        assert not any(method == "crm.lead.update" for method, _ in calls)
-        assert stats["leads_atualizados"] == 0
+        # force=True ainda reenvia o vínculo com o item da SPA (comportamento
+        # existente de "Forçar atualização de campos"), mas sem
+        # event_already_happened a defesa de _aplicar_pos_evento não deve
+        # colocar o Lead em "Pós Evento".
+        lead_update_calls = [payload for method, payload in calls if method == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert "STATUS_ID" not in lead_update_calls[0]["fields"]
+
+    def test_lead_aberto_nao_vinculado_a_este_evento_nao_e_varrido_pro_pos_evento(self, monkeypatch):
+        """Regressão: um Lead aberto do Contato em outra negociação (não
+        vinculado a ESTE evento) nunca deve ser movido pra 'Pós Evento' por
+        um force-rerun deste evento — só o Lead deste evento específico."""
+        calls = []
+
+        def fake_bitrix_call(method, payload):
+            if method == "crm.contact.get":
+                return {}
+            calls.append((method, payload))
+            return "123" if method == "crm.lead.add" else {}
+
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", fake_bitrix_call)
+        monkeypatch.setattr(lead_sync_service, "resolve_enum_id", lambda field, valor: f"ID-{valor}")
+        monkeypatch.setattr(lead_sync_service, "resolve_assessor_and_origem", lambda cupom: (None, "Inscrito Desconhecido"))
+        # Nenhum Lead vinculado a este evento -> cria um novo (já nasce em
+        # Pós Evento, ver TestCreateLeadFromParticipantPosEvento). O Lead
+        # #777 de uma negociação paralela nunca é buscado nem tocado.
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [])
+
+        stats = STATS()
+        field_config = {**POS_EVENTO_FIELD_CONFIG, "field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_origem": "", "stage_alvo": "NEWINSCRITO"}
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, field_config, "", {}, [], item_id=28, force=True, event_already_happened=True, checked_in=True,
+        )
+
+        assert not any(method == "crm.lead.update" and payload.get("id") == 777 for method, payload in calls)
+        add_payload = next(p for m, p in calls if m == "crm.lead.add")
+        assert add_payload["fields"]["STATUS_ID"] == "NEWPOSEVENTO"
 
 
 class TestCreateLeadFromParticipantPosEvento:

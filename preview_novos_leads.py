@@ -17,11 +17,23 @@ Uso:
 
 import logging
 import os
+import sys
+
+try:
+    # Console do Windows (cmd/PowerShell legado) costuma vir em cp1252, que
+    # não tem ✓/⚠ — sem isso o script quebra no meio da varredura assim que
+    # imprime o primeiro caractere fora da tabela, mesmo sem nenhum erro de
+    # negócio. reconfigure() é Python 3.7+; sys.stdout pode não suportar em
+    # ambientes exóticos (ex: capturado por outra ferramenta), daí o guard.
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+except (AttributeError, ValueError):
+    pass
 
 from domain.matching import choose_primary_contact_id
 from services.lead_sync_service import (
     _already_linked_to_item,  # reaproveitado de propósito: mesma comparação (string vs int) do motor de verdade
-    _find_open_lead_ids_for_contact,  # idem: mesma regra "tem Lead aberto?" do motor de verdade
+    _find_lead_ids_for_contact_linked_to_event,  # idem: mesma regra "já tem Lead deste evento?" do motor de verdade
+    _find_open_lead_ids_for_contact,  # só informativo aqui: mostra Lead(s) aberto(s) em OUTRO lugar, que não seriam tocados
     build_cupom_map_loader,
     build_fields_to_advance,
     find_matching_contact_ids,
@@ -67,12 +79,14 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
             print(f"  [CONTATO DUPLICADO] {pid} {full_name} bateu com {len(contact_ids)} Contatos {contact_ids} — usaria só o {primary_id} (menor ID), demais ficariam só registrados pra revisão manual")
             contact_ids = [primary_id]
         for contact_id in contact_ids:
-            open_lead_ids = _find_open_lead_ids_for_contact(contact_id)
+            existing_event_lead_ids = _find_lead_ids_for_contact_linked_to_event(contact_id, spa_item_id) if spa_item_id else []
+            other_open_lead_ids = [lid for lid in _find_open_lead_ids_for_contact(contact_id) if lid not in existing_event_lead_ids]
             item_info = _item_link_info(spa_item_id)
-            if open_lead_ids:
-                print(f"  [CLIENTE] {pid} {full_name} -> Contato {contact_id} (match {contact_match_method}), já tem Lead aberto {open_lead_ids} -> só vincularia esse(s) Lead(s) ao evento ({item_info})")
+            other_info = f" (Contato também tem Lead(s) aberto(s) em outro lugar {other_open_lead_ids}, que NÃO seriam tocados)" if other_open_lead_ids else ""
+            if existing_event_lead_ids:
+                print(f"  [CLIENTE] {pid} {full_name} -> Contato {contact_id} (match {contact_match_method}), já tem Lead {existing_event_lead_ids} ligado a este evento -> só atualizaria/vincularia esse Lead ({item_info}){other_info}")
             else:
-                print(f"  [CLIENTE] {pid} {full_name} -> Contato {contact_id} (match {contact_match_method}), sem Lead aberto -> CRIARIA Lead novo vinculado ao Contato ({item_info})")
+                print(f"  [CLIENTE] {pid} {full_name} -> Contato {contact_id} (match {contact_match_method}) -> CRIARIA Lead novo vinculado ao Contato, mesmo que o Contato já tenha outro Lead aberto em outro estágio ({item_info}){other_info}")
         return
 
     lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
