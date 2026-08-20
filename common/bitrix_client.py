@@ -75,6 +75,41 @@ def find_contact_ids_by_email(email: str) -> list[int]:
     return _find_ids_by_comm("CONTACT", "EMAIL", normalize_email(email))
 
 
+def _format_cpf_mask(cpf_digits: str) -> str:
+    return f"{cpf_digits[:3]}.{cpf_digits[3:6]}.{cpf_digits[6:9]}-{cpf_digits[9:]}"
+
+
+def _find_ids_by_custom_field(list_method: str, field_code: str, value: str) -> list[int]:
+    rows = bitrix_list_all(list_method, {"filter": {field_code: value}, "select": ["ID"]})
+    return [int(row["ID"]) for row in rows]
+
+
+def _find_ids_by_cpf(list_method: str, cpf_digits: str, field_code: str) -> list[int]:
+    """crm.duplicate.findbycomm (usado pra telefone/e-mail) só aceita
+    PHONE/EMAIL — CPF é um campo customizado (UF_CRM_...), então a busca é
+    via filtro direto em crm.lead.list/crm.contact.list. cpf_digits já vem
+    normalizado (só dígitos, 11 caracteres) de
+    common.normalization.normalize_cpf. Tenta o formato só-dígitos
+    primeiro; se não achar nada, tenta o formato pontuado
+    "000.000.000-00" — dado histórico no Bitrix está salvo em formatos
+    inconsistentes, sem normalização prévia (não vale a pena reescrever
+    dado existente só pra viabilizar a busca)."""
+    if not cpf_digits or not field_code:
+        return []
+    ids = _find_ids_by_custom_field(list_method, field_code, cpf_digits)
+    if ids:
+        return ids
+    return _find_ids_by_custom_field(list_method, field_code, _format_cpf_mask(cpf_digits))
+
+
+def find_lead_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
+    return _find_ids_by_cpf("crm.lead.list", cpf_digits, field_code)
+
+
+def find_contact_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
+    return _find_ids_by_cpf("crm.contact.list", cpf_digits, field_code)
+
+
 _enum_id_cache: dict[tuple[str, str], str] = {}
 
 

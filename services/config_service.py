@@ -15,6 +15,8 @@ import logging
 import time
 
 from common import (
+    FIELD_CPF_CONTACT,
+    FIELD_CPF_LEAD,
     FIELD_DATA_DO_EVENTO,
     FIELD_FILTRAR_EVENTO,
     FIELD_NOME_DO_EVENTO,
@@ -38,6 +40,8 @@ _DEFAULTS = {
     "FIELD_ORIGEM": FIELD_ORIGEM,
     "FIELD_FILTRAR_EVENTO": FIELD_FILTRAR_EVENTO,
     "FIELD_PRESENTE_NO_EVENTO": FIELD_PRESENTE_NO_EVENTO,
+    "FIELD_CPF_LEAD": FIELD_CPF_LEAD,
+    "FIELD_CPF_CONTACT": FIELD_CPF_CONTACT,
     "STAGE_INSCRITO_PRO_EVENTO": STAGE_INSCRITO_PRO_EVENTO,
     "STAGE_POS_EVENTO": STAGE_POS_EVENTO,
 }
@@ -91,6 +95,14 @@ def get_field_filtrar_evento() -> str:
 
 def get_field_presente_no_evento() -> str:
     return load_config()["FIELD_PRESENTE_NO_EVENTO"]
+
+
+def get_field_cpf_lead() -> str:
+    return load_config()["FIELD_CPF_LEAD"]
+
+
+def get_field_cpf_contact() -> str:
+    return load_config()["FIELD_CPF_CONTACT"]
 
 
 def get_stage_inscrito_pro_evento() -> str:

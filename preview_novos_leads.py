@@ -5,7 +5,8 @@ Automação A FARIA em CADA inscrito de cada evento próximo — criar Lead
 campos) — sem chamar nenhum endpoint de ESCRITA do Bitrix
 (crm.lead.add/crm.lead.update/userfield.update). As únicas chamadas que
 saem são leituras (Sympla, crm.duplicate.findbycomm, crm.lead.list,
-crm.lead.get, user.get) — nenhuma delas muda dado nenhum.
+crm.contact.list, crm.lead.get, user.get) — nenhuma delas muda dado
+nenhum.
 
 Ignora de propósito o cache de "já processado" da Automação A (mostra
 TODO mundo, não só quem seria "novo") — é só pra validação manual, não
@@ -41,15 +42,18 @@ from services.lead_sync_service import (
     resolve_assessor_and_origem,
 )
 from common import (
+    extract_cpf,
     extract_discount_code,
     extract_phone,
     format_phone_br,
     get_lead,
     get_sympla_all_participants,
     list_upcoming_events,
+    normalize_cpf,
     participant_full_name,
     resolve_user_id_by_email,
     spa_find_item_by_sympla_event_id,
+    LEAD_CLOSED_STAGES,
     OLD_FUNNEL_STAGES,
 )
 
@@ -70,9 +74,10 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
     phone_key = format_phone_br(phone_raw)
     email = participant.get("email") or ""
     full_name = participant_full_name(participant)
+    cpf = normalize_cpf(extract_cpf(participant))
     pid = participant.get("id")
 
-    contact_ids, contact_match_method = find_matching_contact_ids(phone_key, email)
+    contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
     if contact_ids:
         if len(contact_ids) > 1:
             primary_id = choose_primary_contact_id(contact_ids)
@@ -89,11 +94,16 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
                 print(f"  [CLIENTE] {pid} {full_name} -> Contato {contact_id} (match {contact_match_method}) -> CRIARIA Lead novo vinculado ao Contato, mesmo que o Contato já tenha outro Lead aberto em outro estágio ({item_info}){other_info}")
         return
 
-    lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
+    lead_ids, match_method = find_matching_lead_ids(cpf, phone_key, email, full_name)
+    leads_by_id = {lead_id: get_lead(lead_id) for lead_id in lead_ids}
+    closed_lead_ids = [lid for lid in lead_ids if leads_by_id[lid].get("STATUS_ID") in LEAD_CLOSED_STAGES]
+    open_lead_ids = [lid for lid in lead_ids if lid not in closed_lead_ids]
+    if closed_lead_ids:
+        print(f"  [LEAD FECHADO IGNORADO] {pid} {full_name} bateu com Lead(s) fechado(s) {closed_lead_ids} (JUNK/CONVERTED) — não reabre sozinho")
 
-    if lead_ids:
-        for lead_id in lead_ids:
-            lead = get_lead(lead_id)
+    if open_lead_ids:
+        for lead_id in open_lead_ids:
+            lead = leads_by_id[lead_id]
             is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
             # filtrar_evento_id sempre "" aqui: resolver de verdade passaria
             # por ensure_enum_value, que pode ESCREVER (cria item de lista
@@ -110,7 +120,7 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
         return
 
     if not phone_key:
-        print(f"  [PULARIA] {pid} {full_name}: sem telefone e sem match por nome/e-mail")
+        print(f"  [PULARIA] {pid} {full_name}: sem telefone e sem match por cpf/nome/e-mail")
         return
 
     cupom = extract_discount_code(participant, get_cupom_map)

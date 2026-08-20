@@ -5,6 +5,7 @@ from common.normalization import (
     extract_phone,
     format_event_label,
     format_phone_br,
+    normalize_cpf,
     normalize_cupom,
     normalize_email,
     normalize_name,
@@ -99,6 +100,28 @@ class TestExtractCpf:
 
     def test_sem_custom_form(self):
         assert extract_phone({}) == ""
+
+
+class TestNormalizeCpf:
+    def test_com_pontuacao(self):
+        assert normalize_cpf("057.077.113-76") == "05707711376"
+
+    def test_so_digitos(self):
+        assert normalize_cpf("05707711376") == "05707711376"
+
+    def test_cnpj_14_digitos_rejeitado(self):
+        assert normalize_cpf("11.222.333/0001-81") == ""
+
+    def test_digitos_repetidos_rejeitado(self):
+        assert normalize_cpf("000.000.000-00") == ""
+        assert normalize_cpf("11111111111") == ""
+
+    def test_menos_de_11_digitos_rejeitado(self):
+        assert normalize_cpf("123456789") == ""
+
+    def test_vazio(self):
+        assert normalize_cpf("") == ""
+        assert normalize_cpf(None) == ""
 
 
 class TestParticipantFullName:

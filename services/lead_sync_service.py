@@ -1,7 +1,7 @@
 """
 O motor da Automação A: descobre eventos próximos na Sympla, casa cada
-inscrito com um Lead do Bitrix24 (telefone → e-mail → nome), avança o
-estágio quando aplicável ou cria um Lead novo, resolvendo cupom→assessor
+inscrito com um Lead do Bitrix24 (CPF → telefone → e-mail → nome), avança
+o estágio quando aplicável ou cria um Lead novo, resolvendo cupom→assessor
 via services/coupon_service.py.
 
 Extraído de automacao_a_inscricoes.py (que virou um wrapper de CLI fino
@@ -31,8 +31,10 @@ from common import (
     ensure_enum_value,
     extract_cpf,
     extract_discount_code,
+    find_contact_ids_by_cpf,
     find_contact_ids_by_email,
     find_contact_ids_by_phone,
+    find_lead_ids_by_cpf,
     find_lead_ids_by_email,
     find_lead_ids_by_phone,
     format_event_label,
@@ -43,6 +45,7 @@ from common import (
     get_sympla_all_orders,
     get_sympla_all_participants,
     list_upcoming_events,
+    normalize_cpf,
     normalize_email,
     normalize_name,
     participant_full_name,
@@ -69,6 +72,7 @@ from domain.matching import (
     contact_needs_new_event_lead,
     find_matching_contact_ids as _find_matching_contact_ids,
     find_matching_lead_ids as _find_matching_lead_ids,
+    names_are_compatible,
 )
 from domain.stage_rules import build_fields_to_advance, deve_mover_pos_evento
 from repositories import eventos_config_repo, logs_repo, processed_repo
@@ -95,6 +99,8 @@ def _resolve_field_config() -> dict:
         "field_filtrar_evento": config_service.get_field_filtrar_evento(),
         "field_origem": config_service.get_field_origem(),
         "field_presente_no_evento": config_service.get_field_presente_no_evento(),
+        "field_cpf_lead": config_service.get_field_cpf_lead(),
+        "field_cpf_contact": config_service.get_field_cpf_contact(),
         "stage_alvo": config_service.get_stage_inscrito_pro_evento(),
         "stage_pos_evento": config_service.get_stage_pos_evento(),
     }
@@ -105,28 +111,33 @@ def _resolve_field_config() -> dict:
 # (filtro "%NAME" do Bitrix) em vez de baixar o portal inteiro — o portal
 # tem milhares de Leads, então indexar tudo em memória a cada fallback
 # seria caro demais. A comparação final ainda é feita localmente com
-# normalize_name (ignora acento/maiúscula/espaçamento), o filtro do Bitrix
-# só reduz a lista de candidatos.
+# names_are_compatible (palavra inteira, não igualdade exata — "Kelly
+# Sabina" confirma contra "KELLY SABINA PASSOS SANTOS"), o filtro do
+# Bitrix só reduz a lista de candidatos.
 # ---------------------------------------------------------------------------
 def find_lead_ids_by_name(full_name: str) -> list[int]:
-    key = normalize_name(full_name)
-    if not key:
+    if not normalize_name(full_name):
         return []
     candidates = bitrix_list_all(
         "crm.lead.list",
         {"filter": {"%NAME": full_name}, "select": ["ID", "NAME"]},
     )
-    return [int(lead["ID"]) for lead in candidates if normalize_name(lead.get("NAME", "")) == key]
+    return [int(lead["ID"]) for lead in candidates if names_are_compatible(full_name, lead.get("NAME", ""))]
 
 
-def find_matching_lead_ids(phone_key: str, email: str, full_name: str) -> tuple[list[int], str | None]:
+def find_matching_lead_ids(cpf: str, phone_key: str, email: str, full_name: str) -> tuple[list[int], str | None]:
     """Fina casca sobre domain.matching: liga a cascata de decisão (pura)
     às buscas reais no Bitrix. Mantida com esta assinatura porque
-    preview_novos_leads.py importa esta função diretamente deste módulo."""
+    preview_novos_leads.py importa esta função diretamente deste módulo.
+    O código do campo de CPF é resolvido aqui via config_service (cache
+    de 60s) em vez de vir por parâmetro — diferente de telefone/e-mail
+    (busca nativa do Bitrix), CPF é campo customizado configurável."""
     return _find_matching_lead_ids(
+        cpf,
         phone_key,
         email,
         full_name,
+        lookup_by_cpf=lambda c: find_lead_ids_by_cpf(c, config_service.get_field_cpf_lead()),
         lookup_by_phone=find_lead_ids_by_phone,
         lookup_by_email=find_lead_ids_by_email,
         lookup_by_name=find_lead_ids_by_name,
@@ -134,12 +145,14 @@ def find_matching_lead_ids(phone_key: str, email: str, full_name: str) -> tuple[
     )
 
 
-def find_matching_contact_ids(phone_key: str, email: str) -> tuple[list[int], str | None]:
-    """Fina casca sobre domain.matching para Contatos (clientes) — telefone
-    e e-mail só, sem fallback por nome (ver domain/matching.py)."""
+def find_matching_contact_ids(cpf: str, phone_key: str, email: str) -> tuple[list[int], str | None]:
+    """Fina casca sobre domain.matching para Contatos (clientes) — CPF,
+    telefone e e-mail, sem fallback por nome (ver domain/matching.py)."""
     return _find_matching_contact_ids(
+        cpf,
         phone_key,
         email,
+        lookup_by_cpf=lambda c: find_contact_ids_by_cpf(c, config_service.get_field_cpf_contact()),
         lookup_by_phone=find_contact_ids_by_phone,
         lookup_by_email=find_contact_ids_by_email,
     )
@@ -238,7 +251,7 @@ def _aplicar_pos_evento(fields: dict, status_atual: str | None, event_already_ha
         fields[field_config["field_presente_no_evento"]] = resolve_enum_id(field_config["field_presente_no_evento"], valor_texto)
 
 
-def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None, event_already_happened: bool = False, force: bool = False, checked_in: bool = False) -> int:
+def create_lead_from_participant(participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, sympla_event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], contact_id: int | None = None, item_id: int | None = None, event_already_happened: bool = False, force: bool = False, checked_in: bool = False, cpf: str = "") -> int:
     """Cria um Lead novo. contact_id/item_id são usados no branch "cliente"
     (Contato já existente que ainda não tem Lead vinculado a este evento):
     mesma lógica de cupom→assessor/origem de sempre também se aplica aqui —
@@ -278,6 +291,8 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
         fields["CONTACT_ID"] = contact_id
     if item_id:
         fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+    if cpf and field_config.get("field_cpf_lead"):
+        fields[field_config["field_cpf_lead"]] = cpf
     fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=None))
     _aplicar_pos_evento(fields, None, event_already_happened, force, checked_in, field_config)
 
@@ -288,17 +303,19 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     return int(new_id)
 
 
-def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool) -> None:
+def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool, cpf: str = "") -> None:
     """Branch "cliente": o inscrito bateu com um Contato já existente.
-    Vincula o Contato ao item do evento; se esse Contato ainda não tem
-    nenhum Lead vinculado a ESTE evento, cria um Lead novo em "Inscrito Pro
-    Evento" (mesma lógica de cupom→assessor de sempre) — mesmo que o
-    Contato já tenha outro Lead aberto em outro estágio (negociação em
-    andamento, funil antigo etc.): esse Lead paralelo nunca é tocado, regra
-    de negócio confirmada é que todo cliente inscrito precisa aparecer com
-    card próprio em Inscrito Pro Evento. Se o Lead deste evento já existe
-    (rerun via "Forçar atualização de campos"), só atualiza/vincula esse(s)
-    Lead(s) — não cria de novo.
+    Vincula o Contato ao item do evento (e preenche o CPF do Contato se
+    estiver vazio — nunca sobrescreve um valor já preenchido); se esse
+    Contato ainda não tem nenhum Lead vinculado a ESTE evento, cria um
+    Lead novo em "Inscrito Pro Evento" (mesma lógica de cupom→assessor de
+    sempre) — mesmo que o Contato já tenha outro Lead aberto em outro
+    estágio (negociação em andamento, funil antigo etc.): esse Lead
+    paralelo nunca é tocado, regra de negócio confirmada é que todo
+    cliente inscrito precisa aparecer com card próprio em Inscrito Pro
+    Evento. Se o Lead deste evento já existe (rerun via "Forçar
+    atualização de campos"), só atualiza/vincula esse(s) Lead(s) — não
+    cria de novo.
 
     Se bater com MAIS de um Contato (dado duplicado pré-existente no
     Bitrix — mesmo e-mail/telefone em dois registros — não causado pela
@@ -323,9 +340,14 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
 
     for contact_id in contact_ids:
         contact = bitrix_call("crm.contact.get", {"id": contact_id})
+        contact_fields = {}
         if item_id and (force or not _already_linked_to_item(contact, item_id)):
-            bitrix_call("crm.contact.update", {"id": contact_id, "fields": {FIELD_PARENT_ID_EVENTO_SPA: item_id}})
-            log.info("Contato %s vinculado ao evento %s (item %s).", contact_id, event_name, item_id)
+            contact_fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+        if cpf and field_config.get("field_cpf_contact") and not contact.get(field_config["field_cpf_contact"]):
+            contact_fields[field_config["field_cpf_contact"]] = cpf
+        if contact_fields:
+            bitrix_call("crm.contact.update", {"id": contact_id, "fields": contact_fields})
+            log.info("Contato %s atualizado (evento %s, item %s): %s", contact_id, event_name, item_id, contact_fields)
 
         existing_event_lead_ids = _find_lead_ids_for_contact_linked_to_event(contact_id, item_id) if item_id else []
         if contact_needs_new_event_lead(existing_event_lead_ids):
@@ -333,7 +355,7 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
                 stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
                 contact_id=contact_id, item_id=item_id,
-                event_already_happened=event_already_happened, force=force, checked_in=checked_in,
+                event_already_happened=event_already_happened, force=force, checked_in=checked_in, cpf=cpf,
             )
         else:
             for lead_id in existing_event_lead_ids:
@@ -377,16 +399,18 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     full_name = participant_full_name(participant)
     cupom = extract_discount_code(participant, get_cupom_map)
     checked_in = bool((participant.get("checkin") or {}).get("check_in_date"))
+    cpf_raw = extract_cpf(participant)
+    cpf = normalize_cpf(cpf_raw)
     valores_disponiveis = {
         "cupom_desconto": cupom,
         "telefone": phone_key,
         "nome_completo": full_name,
         "email": email,
-        "cpf": extract_cpf(participant),
+        "cpf": cpf_raw,
     }
 
     try:
-        contact_ids, _contact_match_method = find_matching_contact_ids(phone_key, email)
+        contact_ids, _contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
     except Exception as exc:
         log.error("Falha ao buscar contato (cliente) pro inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
@@ -394,7 +418,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
 
     if contact_ids:
         try:
-            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, event_already_happened, checked_in)
+            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, event_already_happened, checked_in, cpf=cpf)
             return True
         except Exception as exc:
             log.error("Falha ao processar cliente (contato) pro inscrito %s: %s", participant.get("id"), exc)
@@ -402,16 +426,22 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
             return False
 
     try:
-        lead_ids, match_method = find_matching_lead_ids(phone_key, email, full_name)
+        lead_ids, match_method = find_matching_lead_ids(cpf, phone_key, email, full_name)
     except Exception as exc:
         log.error("Falha ao buscar lead pro inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
         return False
 
     try:
-        if lead_ids:
-            for lead_id in lead_ids:
-                lead = get_lead(lead_id)
+        leads_by_id = {lead_id: get_lead(lead_id) for lead_id in lead_ids}
+        open_lead_ids = [lid for lid in lead_ids if leads_by_id[lid].get("STATUS_ID") not in LEAD_CLOSED_STAGES]
+        closed_lead_ids = [lid for lid in lead_ids if lid not in open_lead_ids]
+        if closed_lead_ids:
+            log.info("Lead(s) %s (fechado — JUNK/CONVERTED) ignorado(s) pro inscrito %s — não reabre sozinho.", closed_lead_ids, participant.get("id"))
+
+        if open_lead_ids:
+            for lead_id in open_lead_ids:
+                lead = leads_by_id[lead_id]
                 is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
                 fields = build_fields_to_advance(
                     lead, event_name, event_date, event_id, filtrar_evento_id, force=force,
@@ -431,6 +461,8 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 fields.update(resolve_extra_fields(valores_disponiveis, extra_mapeamentos, lead=lead, force=force))
                 if item_id and (force or not _already_linked_to_item(lead, item_id)):
                     fields[FIELD_PARENT_ID_EVENTO_SPA] = item_id
+                if cpf and field_config.get("field_cpf_lead") and not lead.get(field_config["field_cpf_lead"]):
+                    fields[field_config["field_cpf_lead"]] = cpf
                 _aplicar_pos_evento(fields, lead.get("STATUS_ID"), event_already_happened, force, checked_in, field_config)
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
@@ -442,10 +474,10 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
         elif phone_key:
             create_lead_from_participant(
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id,
-                event_already_happened=event_already_happened, force=force, checked_in=checked_in,
+                event_already_happened=event_already_happened, force=force, checked_in=checked_in, cpf=cpf,
             )
         else:
-            log.warning("Inscrito sem telefone e sem nome/e-mail batendo com Lead existente, pulando: %s", participant.get("id"))
+            log.warning("Inscrito sem telefone e sem nome/e-mail/cpf batendo com Lead existente aberto, pulando: %s", participant.get("id"))
         return True
     except Exception as exc:
         log.error("Falha ao processar inscrito %s: %s", participant.get("id"), exc)

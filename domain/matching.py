@@ -1,14 +1,19 @@
 """
-Cascata de matching telefone -> e-mail -> nome: a DECISÃO de qual critério
-tentar e em que ordem, isolada das chamadas reais ao Bitrix.
+Cascata de matching CPF -> telefone -> e-mail -> nome: a DECISÃO de qual
+critério tentar e em que ordem, isolada das chamadas reais ao Bitrix.
 
-lookup_by_phone/lookup_by_email/lookup_by_name são callables injetados
-(assinatura `str -> list[int]`) — em produção, automacao_a_inscricoes.py
-passa as funções reais de common.bitrix_client; em teste, dá pra passar
-stubs e verificar a cascata sem nenhuma chamada de rede.
+lookup_by_cpf/lookup_by_phone/lookup_by_email/lookup_by_name são
+callables injetados (assinatura `str -> list[int]`) — em produção,
+services/lead_sync_service.py passa as funções reais de
+common.bitrix_client; em teste, dá pra passar stubs e verificar a cascata
+sem nenhuma chamada de rede.
 
-Próximo degrau natural, quando a Sympla passar a coletar CPF: checar CPF
-antes de telefone, é o identificador mais confiável.
+CPF é o critério mais forte (único por pessoa desde que o Sympla passou a
+coletar CPF obrigatório no formulário de inscrição) — checado primeiro,
+sem a defesa de confirmação por nome que telefone/e-mail têm (ver
+find_matching_lead_ids). Continua opcional: inscrições antigas ou eventos
+sem a pergunta de CPF simplesmente não têm esse critério disponível
+(`normalize_cpf` retorna "") e a cascata cai pros critérios de sempre.
 """
 
 from typing import Callable
@@ -19,56 +24,97 @@ LookupFn = Callable[[str], list[int]]
 NameLookupFn = Callable[[int], str]
 
 
+def names_are_compatible(name_a: str, name_b: str) -> bool:
+    """Compara dois nomes por inclusão de palavras inteiras (não
+    igualdade exata, não substring bruta) — true se todas as palavras do
+    nome mais curto aparecem, cada uma inteira, no nome mais longo.
+
+    Igualdade exata é rígida demais: "Kelly Sabina" (como a pessoa
+    digitou no Sympla) e "KELLY SABINA PASSOS SANTOS" (nome completo já
+    cadastrado no Bitrix) são a MESMA pessoa, mas normalize_name(a) ==
+    normalize_name(b) dá False — rejeitaria um match legítimo e criaria
+    um Lead duplicado. Substring bruta também não serve ("ana" apareceria
+    dentro de "mariana", nomes de pessoas diferentes) — por isso a
+    comparação é por palavra inteira, não caractere a caractere."""
+    palavras_a = set(normalize_name(name_a).split())
+    palavras_b = set(normalize_name(name_b).split())
+    if not palavras_a or not palavras_b:
+        return False
+    menor, maior = (palavras_a, palavras_b) if len(palavras_a) <= len(palavras_b) else (palavras_b, palavras_a)
+    return menor.issubset(maior)
+
+
 def find_matching_lead_ids(
+    cpf: str,
     phone_key: str,
     email: str,
     full_name: str,
+    lookup_by_cpf: LookupFn,
     lookup_by_phone: LookupFn,
     lookup_by_email: LookupFn,
     lookup_by_name: LookupFn,
     get_lead_name: NameLookupFn,
 ) -> tuple[list[int], str | None]:
-    """get_lead_name resolve o NAME de um candidato achado por e-mail, pra
-    confirmar que é a mesma pessoa antes de aceitar o match — necessário
-    porque o Sympla pode reaproveitar o e-mail de quem comprou/organizou
-    pra vários inscritos reais diferentes (ex: cupom de cortesia gerado
-    por um assessor pra vários convidados). Se o nome não bater, o match
-    por e-mail é rejeitado e a cascata cai pro passo de busca por nome —
-    mesma defesa que esse passo já faz sozinho. Sem nome no inscrito, não
-    há sinal pra rejeitar, então mantém o comportamento antigo (aceita)."""
-    if phone_key:
-        lead_ids = lookup_by_phone(phone_key)
+    """get_lead_name resolve o NAME de um candidato achado por telefone ou
+    e-mail, pra confirmar que é a mesma pessoa antes de aceitar o match —
+    necessário porque o Sympla pode reaproveitar o telefone/e-mail de
+    quem comprou/organizou pra vários inscritos reais diferentes (ex: um
+    casal dividindo o mesmo celular, cupom de cortesia em grupo gerado
+    por um assessor). A confirmação é por names_are_compatible (palavra
+    inteira, não igualdade exata) — "Kelly Sabina" no Sympla confirma
+    contra "KELLY SABINA PASSOS SANTOS" no Bitrix. Se os nomes forem
+    incompatíveis, o match é rejeitado nesse passo e a cascata continua
+    pro próximo critério. Sem nome no inscrito, não há sinal pra
+    rejeitar, então mantém o comportamento antigo (aceita sem confirmar).
+
+    CPF (primeiro passo) NÃO passa por essa confirmação: é único por
+    pessoa por definição, exigir nome bater em cima disso só criaria
+    falso-negativo (nome legal diferente do nome usado no Sympla) sem
+    ganho de segurança real."""
+    if cpf:
+        lead_ids = lookup_by_cpf(cpf)
         if lead_ids:
-            return lead_ids, "telefone"
+            return lead_ids, "cpf"
+
+    def _confirmados(candidate_ids: list[int]) -> list[int]:
+        if not candidate_ids or not full_name:
+            return candidate_ids
+        return [cid for cid in candidate_ids if names_are_compatible(full_name, get_lead_name(cid))]
+
+    if phone_key:
+        confirmed_ids = _confirmados(lookup_by_phone(phone_key))
+        if confirmed_ids:
+            return confirmed_ids, "telefone"
 
     if email:
-        candidate_ids = lookup_by_email(email)
-        if candidate_ids:
-            key = normalize_name(full_name)
-            confirmed_ids = (
-                [cid for cid in candidate_ids if normalize_name(get_lead_name(cid)) == key]
-                if key
-                else candidate_ids
-            )
-            if confirmed_ids:
-                return confirmed_ids, "email"
+        confirmed_ids = _confirmados(lookup_by_email(email))
+        if confirmed_ids:
+            return confirmed_ids, "email"
 
     lead_ids = lookup_by_name(full_name)
     return lead_ids, ("nome" if lead_ids else None)
 
 
 def find_matching_contact_ids(
+    cpf: str,
     phone_key: str,
     email: str,
+    lookup_by_cpf: LookupFn,
     lookup_by_phone: LookupFn,
     lookup_by_email: LookupFn,
 ) -> tuple[list[int], str | None]:
-    """Cascata telefone -> e-mail, SEM fallback por nome (diferente da
-    cascata de Lead). Um Contato representa um cliente de verdade — um
+    """Cascata CPF -> telefone -> e-mail, SEM fallback por nome (diferente
+    da cascata de Lead). Um Contato representa um cliente de verdade — um
     match por nome (sujeito a falso positivo, ex: dois "João Silva"
     diferentes) vincularia a inscrição de um estranho ao histórico de um
     cliente real, um erro bem mais caro do que o mesmo tipo de engano
-    aconteceria com um Lead desconhecido."""
+    aconteceria com um Lead desconhecido. CPF não tem esse risco (é único
+    por pessoa), por isso pode ser o primeiro critério com segurança."""
+    if cpf:
+        contact_ids = lookup_by_cpf(cpf)
+        if contact_ids:
+            return contact_ids, "cpf"
+
     if phone_key:
         contact_ids = lookup_by_phone(phone_key)
         if contact_ids:
