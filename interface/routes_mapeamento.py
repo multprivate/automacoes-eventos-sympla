@@ -31,6 +31,8 @@ _DESCRICOES = {
     "FIELD_ORIGEM": 'Código do campo customizado "Origem"',
     "FIELD_FILTRAR_EVENTO": 'Código do campo customizado "Filtrar Evento"',
     "FIELD_PRESENTE_NO_EVENTO": 'Código do campo customizado "Presente no evento"',
+    "FIELD_CPF_LEAD": 'Código do campo customizado "CPF" em Lead',
+    "FIELD_CPF_CONTACT": 'Código do campo customizado "CPF" em Contato',
     "STAGE_INSCRITO_PRO_EVENTO": 'Código do estágio "Inscrito Pro Evento" no funil de Leads',
     "STAGE_POS_EVENTO": 'Código do estágio "Pós Evento" no funil de Leads',
 }

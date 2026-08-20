@@ -63,6 +63,20 @@ def extract_cpf(participant: dict) -> str:
     return ""
 
 
+def normalize_cpf(raw: str) -> str:
+    """Chave de comparação/busca por CPF: só dígitos, e só se forem
+    exatamente 11 (tamanho de CPF válido) — CNPJ (14 dígitos), campo
+    vazio ou qualquer outra coisa normaliza pra "" (= "sem CPF pra essa
+    pessoa", cai pro fallback de telefone/e-mail/nome). Também rejeita os
+    11 dígitos repetidos ("00000000000", "11111111111" etc.) — padrão
+    clássico de CPF placeholder/inválido, sempre reprova o dígito
+    verificador oficial, não vale a pena aceitar como identidade real."""
+    digits = re.sub(r"\D", "", raw or "")
+    if len(digits) != 11 or digits == digits[0] * 11:
+        return ""
+    return digits
+
+
 def normalize_name(raw: str) -> str:
     """Lowercase, remove acentos e colapsa espaços — pra comparar nomes
     ignorando maiúsculas/formatação entre Sympla e Bitrix24."""

@@ -57,7 +57,7 @@ class TestFindMatchingLeadIdsWrapper:
         monkeypatch.setattr(lead_sync_service, "find_lead_ids_by_email", lambda email: [3])
         monkeypatch.setattr(lead_sync_service, "find_lead_ids_by_name", lambda name: [])
 
-        ids, method = lead_sync_service.find_matching_lead_ids("", "rcparanegocios@gmail.com", "Natan Prado")
+        ids, method = lead_sync_service.find_matching_lead_ids("", "", "rcparanegocios@gmail.com", "Natan Prado")
 
         assert ids == []
         assert method is None
@@ -202,7 +202,7 @@ class TestProcessClienteParticipant:
 
 class TestProcessParticipantDispatch:
     def test_contato_encontrado_vai_pro_branch_cliente(self, monkeypatch):
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda phone, email: ([42], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([42], "telefone"))
         monkeypatch.setattr(lead_sync_service, "_process_cliente_participant", lambda *a, **kw: None)
         monkeypatch.setattr(
             lead_sync_service, "find_matching_lead_ids",
@@ -217,7 +217,7 @@ class TestProcessParticipantDispatch:
         assert result is True
 
     def test_sem_contato_cai_na_cascata_de_lead(self, monkeypatch):
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda *a, **kw: ([], None))
 
         stats = STATS()
@@ -226,6 +226,179 @@ class TestProcessParticipantDispatch:
             {"id": "1", "email": ""}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
         assert result is True  # sem telefone/e-mail/nome batendo -> pulado, mas tratado como sucesso
+
+
+def _lead_cascata_field_config(field_cpf_lead: str = "") -> dict:
+    return {
+        "field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "",
+        "field_filtrar_evento": "", "field_origem": "", "stage_alvo": "NEWINSCRITO",
+        "field_presente_no_evento": "", "stage_pos_evento": "NEWPOSEVENTO",
+        "field_cpf_lead": field_cpf_lead, "field_cpf_contact": "",
+    }
+
+
+CLIENTE_CPF_PARTICIPANT = {
+    "id": "500", "first_name": "Maria", "last_name": "Silva",
+    "custom_form": [
+        {"name": "Telefone", "value": "(85) 99999-0000"},
+        {"name": "CPF", "value": "057.077.113-76"},
+    ],
+}
+
+
+class TestProcessParticipantLeadFechado:
+    """Regra confirmada: um Lead já fechado (JUNK/CONVERTED) encontrado
+    pela cascata nunca é reaberto sozinho — a inscrição gera um Lead novo
+    em vez disso, mesmo princípio já aplicado à correção do Contato com
+    Lead aberto em outro estágio."""
+
+    def test_so_lead_fechado_cria_lead_novo_sem_tocar_nele(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([54830], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "JUNK"})
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: calls.append(("create_lead", kw)))
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: (_ for _ in ()).throw(AssertionError(f"não deveria chamar {method}")))
+
+        stats = STATS()
+        result = lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, _lead_cascata_field_config(), [],
+        )
+
+        assert result is True
+        assert len(calls) == 1
+        assert calls[0][0] == "create_lead"  # só a chamada de criação, nenhum bitrix_call direto
+        assert calls[0][1]["item_id"] is None
+
+    def test_lead_aberto_e_fechado_juntos_so_atualiza_o_aberto(self, monkeypatch):
+        leads = {1: {"ID": 1, "STATUS_ID": "NEWLEAD"}, 2: {"ID": 2, "STATUS_ID": "CONVERTED"}}
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1, 2], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: leads[lead_id])
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo — já tem um aberto")))
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+
+        stats = STATS()
+        lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, _lead_cascata_field_config(), [],
+        )
+
+        lead_update_calls = [payload for m, payload in calls if m == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert lead_update_calls[0]["id"] == 1
+
+    def test_lead_aberto_em_funil_antigo_continua_sem_mudar_estagio(self, monkeypatch):
+        """Regressão: fora do escopo desta correção — um Lead aberto fora
+        de NEWLEAD/NEWFUP (mas NÃO fechado) continua só ganhando os campos
+        de evento, sem promoção de estágio, exatamente como antes."""
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "UC_Z0M384"})
+        monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo")))
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+
+        field_config = {**_lead_cascata_field_config(), "field_data_do_evento": "UF_DATA_EVENTO"}
+        stats = STATS()
+        lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
+        )
+
+        lead_update_calls = [payload for m, payload in calls if m == "crm.lead.update"]
+        assert len(lead_update_calls) == 1
+        assert lead_update_calls[0]["fields"]["UF_DATA_EVENTO"] == "2026-01-01"
+        assert "STATUS_ID" not in lead_update_calls[0]["fields"]
+
+
+class TestProcessParticipantPreencheCpf:
+    def test_lead_criado_ganha_cpf_do_inscrito(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([], None))
+        monkeypatch.setattr(lead_sync_service, "resolve_assessor_and_origem", lambda cupom: (None, "Inscrito Desconhecido"))
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or "123")
+
+        stats = STATS()
+        lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats,
+            _lead_cascata_field_config(field_cpf_lead="UF_CPF"), [],
+        )
+
+        add_payload = next(p for m, p in calls if m == "crm.lead.add")
+        assert add_payload["fields"]["UF_CPF"] == "05707711376"
+
+    def test_lead_matched_sem_cpf_e_preenchido(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWLEAD"})
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+
+        stats = STATS()
+        lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats,
+            _lead_cascata_field_config(field_cpf_lead="UF_CPF"), [],
+        )
+
+        lead_update_calls = [payload for m, payload in calls if m == "crm.lead.update"]
+        assert lead_update_calls[0]["fields"]["UF_CPF"] == "05707711376"
+
+    def test_lead_matched_com_cpf_ja_preenchido_nao_sobrescreve(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWLEAD", "UF_CPF": "11122233344"})
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
+
+        stats = STATS()
+        lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats,
+            _lead_cascata_field_config(field_cpf_lead="UF_CPF"), [],
+        )
+
+        lead_update_calls = [payload for m, payload in calls if m == "crm.lead.update"]
+        assert not lead_update_calls or "UF_CPF" not in lead_update_calls[0]["fields"]
+
+
+class TestProcessClienteParticipantPreencheCpfContato:
+    def test_contato_sem_cpf_e_preenchido(self, monkeypatch):
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {"ID": 42} if method == "crm.contact.get" else calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id})
+
+        stats = STATS()
+        field_config = {"field_cpf_contact": "UF_CPF_CONTATO"}
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, field_config, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
+            cpf="05707711376",
+        )
+
+        contact_update_calls = [payload for m, payload in calls if m == "crm.contact.update"]
+        assert len(contact_update_calls) == 1
+        assert contact_update_calls[0]["fields"]["UF_CPF_CONTATO"] == "05707711376"
+
+    def test_contato_com_cpf_ja_preenchido_nao_sobrescreve(self, monkeypatch):
+        # Já vinculado ao item da SPA também, pra isolar: a única coisa que
+        # poderia gerar um crm.contact.update aqui seria o CPF, e não deve.
+        calls = []
+        contact_data = {"ID": 42, "UF_CPF_CONTATO": "11122233344", lead_sync_service.FIELD_PARENT_ID_EVENTO_SPA: 28}
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: contact_data if method == "crm.contact.get" else calls.append((method, payload)) or {})
+        monkeypatch.setattr(lead_sync_service, "_find_lead_ids_for_contact_linked_to_event", lambda contact_id, item_id: [777])
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id})
+
+        stats = STATS()
+        field_config = {"field_cpf_contact": "UF_CPF_CONTATO"}
+        lead_sync_service._process_cliente_participant(
+            [42], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
+            stats, field_config, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
+            cpf="05707711376",
+        )
+
+        contact_update_calls = [payload for m, payload in calls if m == "crm.contact.update"]
+        assert not contact_update_calls
 
 
 class TestSyncOneEvent:

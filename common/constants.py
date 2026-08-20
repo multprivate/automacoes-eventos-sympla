@@ -50,6 +50,13 @@ FIELD_ORIGEM = os.environ.get("BITRIX_FIELD_ORIGEM", "")
 FIELD_PRESENTE_NO_EVENTO = os.environ.get("BITRIX_FIELD_PRESENTE_NO_EVENTO", "")
 FIELD_FILTRAR_EVENTO = os.environ.get("BITRIX_FIELD_FILTRAR_EVENTO", "")
 
+# CPF é o critério de match mais forte (único por pessoa) — checado antes
+# de telefone/e-mail em domain/matching.py. Códigos de campo DIFERENTES
+# entre Lead e Contact (não há garantia de serem iguais, diferente de
+# FIELD_PARENT_ID_EVENTO_SPA, que é espelhado de propósito pela SPA).
+FIELD_CPF_LEAD = os.environ.get("BITRIX_FIELD_CPF_LEAD", "")
+FIELD_CPF_CONTACT = os.environ.get("BITRIX_FIELD_CPF_CONTACT", "")
+
 # SPA nativa "Eventos Sympla" do Bitrix (Fase 4) — entityTypeId 1112,
 # criada por um app terceiro (Zopu, já descontinuado) antes deste projeto.
 # O prefixo numérico dos campos (36) é o `id` do tipo em crm.type.list, não
