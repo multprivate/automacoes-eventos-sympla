@@ -1,6 +1,7 @@
 {% extends "base.html" %}
 {% block title %}Mapeamento{% endblock %}
 {% block content %}
+<p class="eyebrow">Configuração</p>
 <h2>Mapeamento</h2>
 <p class="page-subtitle">Campos e estágio do Bitrix. Editar aqui vale pra próxima sincronização (o motor cacheia por 60s). Campo em branco não apaga o valor atual — só edite o que quiser trocar de verdade.</p>
 <p><small>"Presente no evento" (Automação B) não aparece aqui — continua configurado direto no serviço da Automação B, sem depender desta tabela.</small></p>
@@ -24,7 +25,7 @@
         </tbody>
     </table>
     </div>
-    <button type="submit" style="margin-top:1.25rem">Salvar alterações</button>
+    <button type="submit" class="mt-lg">Salvar alterações</button>
 </form>
 
 <h3>Mapeamentos extras de campo</h3>
@@ -55,7 +56,8 @@
 </table>
 </div>
 
-<h3 style="margin-top:1.75rem">+ Novo mapeamento extra</h3>
+<h3 class="mt-xl">+ Novo mapeamento extra</h3>
+<section class="form-card">
 <form method="post" action="{{ url_for('mapeamento.extras_salvar') }}">
     <label for="origem_dado">Dado do inscrito</label>
     <select id="origem_dado" name="origem_dado" required>
@@ -73,6 +75,7 @@
         <option value="novo">Só leads novos</option>
     </select>
 
-    <button type="submit" style="margin-top:1.25rem">Salvar mapeamento</button>
+    <button type="submit" class="mt-lg">Salvar mapeamento</button>
 </form>
+</section>
 {% endblock %}

@@ -1,12 +1,13 @@
 {% extends "base.html" %}
 {% block title %}Logs{% endblock %}
 {% block content %}
+<p class="eyebrow">Auditoria</p>
 <h2>Log de Sincronização</h2>
 <p class="page-subtitle">Histórico das ações realizadas (nesta página: {{ itens|length }} registro(s))</p>
 
 <div class="grid">
     <article><p>Sucessos</p><h4>{{ sucessos }}</h4></article>
-    <article><p>Erros</p><h4>{{ erros }}</h4></article>
+    <article><p>Erros</p><h4 class="{{ 'stat-danger' if erros else '' }}">{{ erros }}</h4></article>
     <article><p>Tempo médio</p><h4>{{ tempo_medio_ms }}ms</h4></article>
 </div>
 
