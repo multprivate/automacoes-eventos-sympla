@@ -183,7 +183,7 @@ class TestProcessClienteParticipant:
         monkeypatch.setattr(lead_sync_service.logs_repo, "insert_item", lambda *a, **kw: log_calls.append((a, kw)))
 
         stats = STATS()
-        lead_sync_service._process_cliente_participant(
+        resultado = lead_sync_service._process_cliente_participant(
             [25216, 538], PARTICIPANT, "+5585999998888", "a@b.com", "Evento", "2026-01-01", "e1", "",
             stats, {}, "", {}, [], item_id=28, force=False, event_already_happened=False, checked_in=False,
         )
@@ -191,6 +191,8 @@ class TestProcessClienteParticipant:
         # só processa o de menor ID (538), não cria um Lead pra cada Contato
         assert len(create_calls) == 1
         assert create_calls[0]["contact_id"] == 538
+        assert resultado["contact_id"] == 538
+        assert resultado["contact_ids_duplicados"] == [25216, 538]
 
         # registra o duplicado achado, pra revisão manual
         assert len(log_calls) == 1
@@ -203,7 +205,10 @@ class TestProcessClienteParticipant:
 class TestProcessParticipantDispatch:
     def test_contato_encontrado_vai_pro_branch_cliente(self, monkeypatch):
         monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([42], "telefone"))
-        monkeypatch.setattr(lead_sync_service, "_process_cliente_participant", lambda *a, **kw: None)
+        monkeypatch.setattr(
+            lead_sync_service, "_process_cliente_participant",
+            lambda *a, **kw: {"contact_id": 42, "lead_id": 7, "contact_ids_duplicados": None, "criou_lead": True, "atualizou": False},
+        )
         monkeypatch.setattr(
             lead_sync_service, "find_matching_lead_ids",
             lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria cair na cascata de Lead")),
@@ -214,7 +219,11 @@ class TestProcessParticipantDispatch:
         result = lead_sync_service.process_participant(
             {"id": "1", "email": "a@b.com"}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
-        assert result is True
+        assert result is not None
+        assert result["is_cliente"] is True
+        assert result["match_method"] == "telefone"
+        assert result["bitrix_contact_id"] == 42
+        assert result["bitrix_lead_id"] == 7
 
     def test_sem_contato_cai_na_cascata_de_lead(self, monkeypatch):
         monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
@@ -225,7 +234,86 @@ class TestProcessParticipantDispatch:
         result = lead_sync_service.process_participant(
             {"id": "1", "email": ""}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
         )
-        assert result is True  # sem telefone/e-mail/nome batendo -> pulado, mas tratado como sucesso
+        assert result is not None  # sem telefone/e-mail/nome batendo -> pulado, mas tratado como sucesso
+        assert result["is_cliente"] is False
+        assert result["match_method"] is None
+        assert result["bitrix_lead_id"] is None
+
+
+class TestProcessParticipantLogPorParticipante:
+    """execucoes_log_itens ganha uma linha por inscrito (PARTICIPANT_CREATED/
+    UPDATED/SKIPPED, migração 0006) — cobertura direta do que
+    _log_participante grava em cada saída de process_participant."""
+
+    def test_cliente_lead_criado_loga_participant_created(self, monkeypatch):
+        log_calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([42], "email"))
+        monkeypatch.setattr(
+            lead_sync_service, "_process_cliente_participant",
+            lambda *a, **kw: {"contact_id": 42, "lead_id": 7, "contact_ids_duplicados": None, "criou_lead": True, "atualizou": False},
+        )
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_item", lambda *a, **kw: log_calls.append((a, kw)))
+
+        stats = STATS()
+        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_origem": "", "stage_alvo": ""}
+        result = lead_sync_service.process_participant(
+            {"id": "1", "email": "a@b.com"}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
+        )
+
+        assert result["match_method"] == "email"
+        assert len(log_calls) == 1
+        args, kwargs = log_calls[0]
+        assert args[0] == "PARTICIPANT_CREATED"
+        assert args[1] == "participante"
+        assert args[2] == "participant #1"
+        assert args[3] == "ok"
+        assert kwargs["sympla_event_id"] == "e1"
+
+    def test_prospect_lead_ja_em_dia_loga_participant_skipped_ok(self, monkeypatch):
+        """Lead já no estágio-alvo e sem nenhum campo de evento configurado
+        pra mudar (_lead_cascata_field_config() só seta stage_alvo) -> build_fields_to_advance
+        não tem nada a fazer, PARTICIPANT_SKIPPED com status ok (não é erro,
+        é 'nada mudou')."""
+        log_calls = []
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWINSCRITO"})
+        monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {})
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_item", lambda *a, **kw: log_calls.append((a, kw)))
+
+        stats = STATS()
+        result = lead_sync_service.process_participant(
+            CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, _lead_cascata_field_config(), [],
+        )
+
+        assert result["is_cliente"] is False
+        assert result["bitrix_lead_id"] == 1
+        assert len(log_calls) == 1
+        assert log_calls[0][0][0] == "PARTICIPANT_SKIPPED"
+        assert log_calls[0][0][3] == "ok"
+
+    def test_falha_ao_buscar_contato_loga_participant_skipped_error_e_retorna_none(self, monkeypatch):
+        log_calls = []
+
+        def _raise(cpf, phone, email):
+            raise RuntimeError("bitrix indisponível")
+
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", _raise)
+        monkeypatch.setattr(lead_sync_service.logs_repo, "insert_item", lambda *a, **kw: log_calls.append((a, kw)))
+
+        stats = STATS()
+        field_config = {"field_data_do_evento": "", "field_nome_do_evento": "", "field_sympla_event_id": "", "field_filtrar_evento": "", "field_origem": "", "stage_alvo": ""}
+        result = lead_sync_service.process_participant(
+            {"id": "1", "email": "a@b.com"}, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, field_config, [],
+        )
+
+        assert result is None
+        assert stats["erros"] == 1
+        assert len(log_calls) == 1
+        args, kwargs = log_calls[0]
+        assert args[0] == "PARTICIPANT_SKIPPED"
+        assert args[3] == "error"
+        assert "bitrix indisponível" in kwargs["erro"]
 
 
 def _lead_cascata_field_config(field_cpf_lead: str = "") -> dict:
@@ -265,7 +353,7 @@ class TestProcessParticipantLeadFechado:
             CLIENTE_CPF_PARTICIPANT, "Evento", "2026-01-01", "e1", "", lambda: {}, stats, _lead_cascata_field_config(), [],
         )
 
-        assert result is True
+        assert result is not None
         assert len(calls) == 1
         assert calls[0][0] == "create_lead"  # só a chamada de criação, nenhum bitrix_call direto
         assert calls[0][1]["item_id"] is None

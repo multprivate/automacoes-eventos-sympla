@@ -303,7 +303,7 @@ def create_lead_from_participant(participant: dict, phone_raw: str, email: str, 
     return int(new_id)
 
 
-def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool, cpf: str = "") -> None:
+def _process_cliente_participant(contact_ids: list[int], participant: dict, phone_raw: str, email: str, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, stats: dict, field_config: dict, cupom: str, valores_disponiveis: dict, extra_mapeamentos: list[dict], item_id: int | None, force: bool, event_already_happened: bool, checked_in: bool, cpf: str = "") -> dict:
     """Branch "cliente": o inscrito bateu com um Contato já existente.
     Vincula o Contato ao item do evento (e preenche o CPF do Contato se
     estiver vazio — nunca sobrescreve um valor já preenchido); se esse
@@ -324,7 +324,16 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
     execucoes_log_itens pra revisão/mesclagem manual, em vez de criar um
     Lead por Contato duplicado. Mesclar Contatos de verdade é uma tarefa
     separada — mexe em dado real de cliente (histórico de negociação,
-    atividades), risco maior do que qualquer coisa que a automação já faz."""
+    atividades), risco maior do que qualquer coisa que a automação já faz.
+
+    Retorna o resultado do match pra process_participant persistir junto
+    da marca de idempotência (participantes_processados, migração 0006):
+    {"contact_id", "lead_id", "contact_ids_duplicados", "criou_lead",
+    "atualizou"}. O laço `for contact_id in contact_ids` sempre roda
+    exatamente uma vez chegando aqui (a lista já vem colapsada num
+    Contato só, ou já tinha um só) — mantido como laço só pra minimizar o
+    diff, não porque itere de verdade."""
+    duplicados = list(contact_ids) if len(contact_ids) > 1 else None
     if len(contact_ids) > 1:
         primary_id = choose_primary_contact_id(contact_ids)
         log.warning(
@@ -338,7 +347,11 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
         )
         contact_ids = [primary_id]
 
+    contact_id_usado = lead_id_usado = None
+    criou_lead = atualizou = False
+
     for contact_id in contact_ids:
+        contact_id_usado = contact_id
         contact = bitrix_call("crm.contact.get", {"id": contact_id})
         contact_fields = {}
         if item_id and (force or not _already_linked_to_item(contact, item_id)):
@@ -351,12 +364,13 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
 
         existing_event_lead_ids = _find_lead_ids_for_contact_linked_to_event(contact_id, item_id) if item_id else []
         if contact_needs_new_event_lead(existing_event_lead_ids):
-            create_lead_from_participant(
+            lead_id_usado = create_lead_from_participant(
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id,
                 stats, field_config, cupom, valores_disponiveis, extra_mapeamentos,
                 contact_id=contact_id, item_id=item_id,
                 event_already_happened=event_already_happened, force=force, checked_in=checked_in, cpf=cpf,
             )
+            criou_lead = True
         else:
             for lead_id in existing_event_lead_ids:
                 lead = get_lead(lead_id)
@@ -367,16 +381,35 @@ def _process_cliente_participant(contact_ids: list[int], participant: dict, phon
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
+                    atualizou = True
                     log.info("Lead %s (cliente, Lead do evento já existia) atualizado (evento %s, item %s): %s", lead_id, event_name, item_id, fields)
+                lead_id_usado = lead_id
+
+    return {
+        "contact_id": contact_id_usado,
+        "lead_id": lead_id_usado,
+        "contact_ids_duplicados": duplicados,
+        "criou_lead": criou_lead,
+        "atualizou": atualizou,
+    }
 
 
-def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False, event_already_happened: bool = False) -> bool:
-    """Retorna True se o inscrito foi tratado com sucesso (atualizado, criado,
-    ou legitimamente pulado — funil antigo/sem telefone), False se algo deu
-    errado e precisa ser tentado de novo na próxima execução. Só entra na
-    marca de "já processado" quem retorna True — assim uma falha transitória
-    (permissão, campo faltando, rede) nunca faz a gente perder o inscrito
-    pra sempre.
+def process_participant(participant: dict, event_name: str, event_date: str, event_id: str, filtrar_evento_id: str, get_cupom_map, stats: dict, field_config: dict, extra_mapeamentos: list[dict], item_id: int | None = None, force: bool = False, event_already_happened: bool = False) -> dict | None:
+    """Retorna um dict-resultado se o inscrito foi tratado com sucesso
+    (atualizado, criado, ou legitimamente pulado — funil antigo/sem
+    telefone), None se algo deu errado e precisa ser tentado de novo na
+    próxima execução. Só entra na marca de "já processado" quem retorna
+    não-None — assim uma falha transitória (permissão, campo faltando,
+    rede) nunca faz a gente perder o inscrito pra sempre.
+
+    O dict retornado (consumido por process_event -> processed_repo.
+    mark_processed_batch, migração 0006) tem sempre as mesmas chaves:
+    participant_id, is_cliente, match_method, bitrix_contact_id,
+    bitrix_lead_id, contact_ids_duplicados — é o resultado do match que
+    alimenta a aba Inscritos do painel. NÃO é gravado inline aqui (só
+    retornado): gravar antes de saber se a chamada ao Bitrix teve sucesso
+    quebraria a garantia de idempotência de participantes_processados
+    (linha existe = nunca mais mexe nesse inscrito) — ver process_event.
 
     force=True ("Forçar atualização de campos" no painel) reenvia os campos
     de evento mesmo que já estejam iguais — não afeta a lógica normal de
@@ -392,7 +425,32 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     rodada, sem afetar a sincronização de Lead/Contato de verdade.
 
     Roda a cascata de Contato (cliente) ANTES da cascata de Lead
-    (prospect) — ver domain/matching.py::find_matching_contact_ids."""
+    (prospect) — ver domain/matching.py::find_matching_contact_ids.
+
+    Grava um log por inscrito em execucoes_log_itens (PARTICIPANT_CREATED/
+    UPDATED/SKIPPED — aba Logs do painel, filtro "Participante"), melhor
+    esforço via _log_participante, mesmo espírito do _log_item de
+    process_event um nível abaixo (grão por inscrito, não por evento)."""
+    inicio = time.monotonic()
+
+    def _log_participante(acao: str, status: str = "ok", erro: str | None = None, detalhes: dict | None = None) -> None:
+        logs_repo.insert_item(
+            acao, "participante", f"participant #{participant.get('id')}", status,
+            int((time.monotonic() - inicio) * 1000),
+            sympla_event_id=event_id, erro=erro, detalhes=detalhes,
+        )
+
+    def _resultado(acao: str, is_cliente: bool, match_method: str | None, contact_id: int | None = None, lead_id: int | None = None, duplicados: list[int] | None = None) -> dict:
+        _log_participante(acao, detalhes={"is_cliente": is_cliente, "match_method": match_method, "contact_id": contact_id, "lead_id": lead_id})
+        return {
+            "participant_id": str(participant.get("id")),
+            "is_cliente": is_cliente,
+            "match_method": match_method,
+            "bitrix_contact_id": contact_id,
+            "bitrix_lead_id": lead_id,
+            "contact_ids_duplicados": duplicados,
+        }
+
     phone_raw = extract_phone(participant)
     phone_key = format_phone_br(phone_raw)
     email = participant.get("email") or ""
@@ -410,27 +468,35 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     }
 
     try:
-        contact_ids, _contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
+        contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
     except Exception as exc:
         log.error("Falha ao buscar contato (cliente) pro inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
-        return False
+        _log_participante("PARTICIPANT_SKIPPED", status="error", erro=str(exc))
+        return None
 
     if contact_ids:
         try:
-            _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, event_already_happened, checked_in, cpf=cpf)
-            return True
+            resultado_cliente = _process_cliente_participant(contact_ids, participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id, force, event_already_happened, checked_in, cpf=cpf)
         except Exception as exc:
             log.error("Falha ao processar cliente (contato) pro inscrito %s: %s", participant.get("id"), exc)
             stats["erros"] += 1
-            return False
+            _log_participante("PARTICIPANT_SKIPPED", status="error", erro=str(exc))
+            return None
+        acao = "PARTICIPANT_CREATED" if resultado_cliente["criou_lead"] else ("PARTICIPANT_UPDATED" if resultado_cliente["atualizou"] else "PARTICIPANT_SKIPPED")
+        return _resultado(
+            acao, True, contact_match_method,
+            contact_id=resultado_cliente["contact_id"], lead_id=resultado_cliente["lead_id"],
+            duplicados=resultado_cliente["contact_ids_duplicados"],
+        )
 
     try:
         lead_ids, match_method = find_matching_lead_ids(cpf, phone_key, email, full_name)
     except Exception as exc:
         log.error("Falha ao buscar lead pro inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
-        return False
+        _log_participante("PARTICIPANT_SKIPPED", status="error", erro=str(exc))
+        return None
 
     try:
         leads_by_id = {lead_id: get_lead(lead_id) for lead_id in lead_ids}
@@ -440,6 +506,8 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
             log.info("Lead(s) %s (fechado — JUNK/CONVERTED) ignorado(s) pro inscrito %s — não reabre sozinho.", closed_lead_ids, participant.get("id"))
 
         if open_lead_ids:
+            lead_id_usado = open_lead_ids[0]
+            atualizou = False
             for lead_id in open_lead_ids:
                 lead = leads_by_id[lead_id]
                 is_old_funnel = lead.get("STATUS_ID") in OLD_FUNNEL_STAGES
@@ -467,22 +535,78 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
                 if fields:
                     bitrix_call("crm.lead.update", {"id": lead_id, "fields": fields})
                     stats["leads_atualizados"] += 1
+                    atualizou = True
+                    lead_id_usado = lead_id
                     tag = " (funil antigo, só campos de evento)" if is_old_funnel else ""
                     log.info("Lead %s atualizado (match por %s)%s: %s", lead_id, match_method, tag, fields)
                 else:
                     log.info("Lead %s já estava em dia, nada pra atualizar.", lead_id)
+            acao = "PARTICIPANT_UPDATED" if atualizou else "PARTICIPANT_SKIPPED"
+            return _resultado(acao, False, match_method, lead_id=lead_id_usado)
         elif phone_key:
-            create_lead_from_participant(
+            novo_lead_id = create_lead_from_participant(
                 participant, phone_raw, email, event_name, event_date, event_id, filtrar_evento_id, stats, field_config, cupom, valores_disponiveis, extra_mapeamentos, item_id=item_id,
                 event_already_happened=event_already_happened, force=force, checked_in=checked_in, cpf=cpf,
             )
+            return _resultado("PARTICIPANT_CREATED", False, match_method, lead_id=novo_lead_id)
         else:
             log.warning("Inscrito sem telefone e sem nome/e-mail/cpf batendo com Lead existente aberto, pulando: %s", participant.get("id"))
-        return True
+            return _resultado("PARTICIPANT_SKIPPED", False, None)
     except Exception as exc:
         log.error("Falha ao processar inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
-        return False
+        _log_participante("PARTICIPANT_SKIPPED", status="error", erro=str(exc))
+        return None
+
+
+def get_event_or_raise(event_id: str) -> dict:
+    """Acha um evento (passado ou futuro) na Sympla pelo id interno.
+    get_all_events(), não list_upcoming_events(): um evento já passado
+    continua valendo pra inspeção/ação manual pelo painel (ex: "Forçar
+    campos" e o botão "Reprocessar" da aba Inscritos)."""
+    event = next((e for e in get_all_events() if e["id"] == event_id), None)
+    if event is None:
+        raise ValueError(f"Evento {event_id} não encontrado na Sympla.")
+    return event
+
+
+def _preparar_contexto_evento(event_id: str, event_name: str, event_date: str) -> dict:
+    """Tudo que process_participant precisa resolver UMA vez por evento
+    (não por inscrito): códigos de campo, mapeamentos extras, o item da
+    lista "Filtrar Evento" (garante via chamada ao Bitrix, ensure_enum_value)
+    e o loader preguiçoso de cupom. Extraído de process_event pra que o
+    reprocessamento de UM inscrito (aba Inscritos) monte exatamente o
+    mesmo contexto, sem duplicar a lógica — divergir aqui faria o botão
+    manual se comportar diferente do cron.
+
+    Deliberadamente NÃO inclui item_id/presentes_count (SPA "Eventos
+    Sympla" + eventos_config): em process_event, isso é resolvido antes
+    da checagem de "tem inscrito novo?" e roda em TODO tick, mesmo sem
+    nada pra processar (mantém os contadores do Dashboard atualizados) —
+    misturar aqui faria process_event resolver field_config/filtrar_evento
+    (que inclui uma chamada ao Bitrix via ensure_enum_value) mesmo quando
+    não há nada novo, quebrando a otimização documentada no topo do
+    módulo ("só chama a API do Bitrix quando há inscrito novo")."""
+    field_config = _resolve_field_config()
+    extra_mapeamentos = campo_mapeamento_service.load_mapeamentos()
+
+    filtrar_evento_id = ""
+    if field_config["field_filtrar_evento"]:
+        label = format_event_label(event_name, event_date)
+        try:
+            filtrar_evento_id = ensure_enum_value(field_config["field_filtrar_evento"], label)
+        except Exception as exc:
+            log.error("Falha ao garantir item '%s' na lista do campo %s: %s", label, field_config["field_filtrar_evento"], exc)
+
+    event_already_happened = bool(event_date) and event_date < date.today().isoformat()
+
+    return {
+        "field_config": field_config,
+        "extra_mapeamentos": extra_mapeamentos,
+        "filtrar_evento_id": filtrar_evento_id,
+        "get_cupom_map": build_cupom_map_loader(event_id),
+        "event_already_happened": event_already_happened,
+    }
 
 
 def process_event(event: dict, stats: dict, force: bool = False) -> bool:
@@ -552,35 +676,26 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
 
     log.info("%d inscrito(s) a processar em %s (id interno %s) de %d no total.", len(participants_to_process), event_name, event_id, len(participants))
 
-    field_config = _resolve_field_config()
-    extra_mapeamentos = campo_mapeamento_service.load_mapeamentos()
+    ctx = _preparar_contexto_evento(event_id, event_name, event_date)
 
-    filtrar_evento_id = ""
-    if field_config["field_filtrar_evento"]:
-        label = format_event_label(event_name, event_date)
-        try:
-            filtrar_evento_id = ensure_enum_value(field_config["field_filtrar_evento"], label)
-        except Exception as exc:
-            log.error("Falha ao garantir item '%s' na lista do campo %s: %s", label, field_config["field_filtrar_evento"], exc)
+    resultados = []
+    for participant in participants_to_process:
+        resultado = process_participant(participant, event_name, event_date, event_id, ctx["filtrar_evento_id"], ctx["get_cupom_map"], stats, ctx["field_config"], ctx["extra_mapeamentos"], item_id=item_id, force=force, event_already_happened=event_already_happened)
+        if resultado is not None:
+            resultados.append(resultado)
 
-    get_cupom_map = build_cupom_map_loader(event_id)
-    newly_done = {
-        str(participant.get("id"))
-        for participant in participants_to_process
-        if process_participant(participant, event_name, event_date, event_id, filtrar_evento_id, get_cupom_map, stats, field_config, extra_mapeamentos, item_id=item_id, force=force, event_already_happened=event_already_happened)
-    }
-
-    if not newly_done:
+    if not resultados:
         _log_item("ok")
         return False
 
     try:
-        processed_repo.mark_processed_batch(event_id, newly_done)
+        processed_repo.mark_processed_batch(event_id, resultados)
     except Exception as exc:
         # Os Leads já foram atualizados/criados no Bitrix com sucesso — só
-        # a marca de idempotência falhou. Não perde o inscrito: na pior das
-        # hipóteses ele é reprocessado (idempotente) na próxima execução.
-        log.warning("Falha ao marcar %d participante(s) como processados em %s: %s", len(newly_done), event_id, exc)
+        # a marca de idempotência (e o resultado do match) falhou em
+        # gravar. Não perde o inscrito: na pior das hipóteses ele é
+        # reprocessado (idempotente) na próxima execução.
+        log.warning("Falha ao marcar %d participante(s) como processados em %s: %s", len(resultados), event_id, exc)
 
     _log_item("ok")
     return True
@@ -658,16 +773,14 @@ def sync_one_event(event_id: str, force: bool = False) -> dict:
     com force=True). Também grava um resumo em execucoes_log, mesmo espírito
     de sync_all_upcoming_events().
 
-    Usa get_all_events() (todo evento do organizador, passado ou futuro),
-    não list_upcoming_events() — diferente do Cron Job (que só processa
-    eventos futuros), aqui é uma ação explícita do painel sobre um evento
-    específico, e "Forçar campos" precisa funcionar em evento já passado
-    (é exatamente quando ele preenche presença e move pra Pós Evento)."""
+    Usa get_event_or_raise() (todo evento do organizador, passado ou
+    futuro), não list_upcoming_events() — diferente do Cron Job (que só
+    processa eventos futuros), aqui é uma ação explícita do painel sobre
+    um evento específico, e "Forçar campos" precisa funcionar em evento
+    já passado (é exatamente quando ele preenche presença e move pra Pós
+    Evento)."""
     iniciado_em = datetime.now(timezone.utc)
-    events = get_all_events()
-    event = next((e for e in events if e["id"] == event_id), None)
-    if event is None:
-        raise ValueError(f"Evento {event_id} não encontrado na Sympla.")
+    event = get_event_or_raise(event_id)
 
     stats = _new_stats()
     stats["eventos_processados"] = 1
