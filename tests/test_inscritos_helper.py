@@ -90,10 +90,20 @@ class TestMontarFunilBarras:
 class TestFilterLinhas:
     def _linhas(self):
         return [
-            {"nome": "Karine Gomes", "email": "karine@example.com", "status": "prospect"},
-            {"nome": "Paulo Salim", "email": "paulo@example.com", "status": "cliente"},
-            {"nome": "Elienai Luz", "email": "elienai@hotmail.com", "status": "cliente"},
+            {"nome": "Karine Gomes", "email": "karine@example.com", "status": "prospect", "etapa_bucket": "inscrito"},
+            {"nome": "Paulo Salim", "email": "paulo@example.com", "status": "cliente", "etapa_bucket": "pos_evento"},
+            {"nome": "Elienai Luz", "email": "elienai@hotmail.com", "status": "cliente", "etapa_bucket": "convertido"},
         ]
+
+    def test_filtra_por_etapa(self):
+        resultado = filter_linhas(self._linhas(), etapa="pos_evento")
+        assert [l["nome"] for l in resultado] == ["Paulo Salim"]
+
+    def test_combina_status_e_etapa(self):
+        """status e etapa são independentes: um cliente pode estar em
+        qualquer etapa do funil."""
+        resultado = filter_linhas(self._linhas(), status="cliente", etapa="convertido")
+        assert [l["nome"] for l in resultado] == ["Elienai Luz"]
 
     def test_sem_filtro_retorna_tudo(self):
         assert filter_linhas(self._linhas()) == self._linhas()

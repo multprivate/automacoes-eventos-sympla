@@ -76,19 +76,30 @@ def montar_funil_barras(funil: dict | None) -> list[dict] | None:
     ]
 
 
-def filter_linhas(linhas: list[dict], q: str = "", status: str = "") -> list[dict]:
+def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str = "") -> list[dict]:
     """Filtro server-side pra aba Inscritos — `q` casa substring (sem
     diferenciar maiúsculas) em nome OU e-mail; `status` casa exato contra
-    "cliente"/"prospect"/"nao_verificado". Os dois em branco = não filtra
-    nada. Aplicado só na LISTAGEM — o resumo/funil da tela continuam
-    calculados sobre o evento inteiro (interface/routes_eventos.py), pra
-    filtrar não dar a impressão de que a taxa de conversão mudou."""
+    "cliente"/"prospect"/"nao_verificado" (calculado em build_inscritos_view,
+    a partir de participantes_processados); `etapa` casa exato contra o
+    bucket do funil do Lead vinculado (linha["etapa_bucket"], preenchido em
+    interface/routes_eventos.py::_montar_dados_evento a partir do estágio
+    ATUAL no Bitrix — "inscrito"/"pos_evento"/"reuniao"/"convertido"/
+    "perdido"/"fora_do_funil"). status e etapa são independentes: um
+    inscrito pode ser "cliente" (bateu com um Contato) e o Lead dele estar
+    em qualquer etapa do funil.
+
+    Todos em branco = não filtra nada. Aplicado só na LISTAGEM — o
+    resumo/funil da tela continuam calculados sobre o evento inteiro
+    (interface/routes_eventos.py), pra filtrar não dar a impressão de que
+    a taxa de conversão mudou."""
     resultado = linhas
     if q:
         termo = q.strip().lower()
         resultado = [l for l in resultado if termo in l["nome"].lower() or termo in l["email"].lower()]
     if status:
         resultado = [l for l in resultado if l["status"] == status]
+    if etapa:
+        resultado = [l for l in resultado if l["etapa_bucket"] == etapa]
     return resultado
 
 

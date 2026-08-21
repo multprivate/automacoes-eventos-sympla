@@ -5,7 +5,7 @@
 <h2>{{ evento.nome }}</h2>
 <p class="page-subtitle">
     {{ evento.data }} · <code>{{ evento.id }}</code> · {{ total_geral }} inscrito(s)
-    {%- if q or status %} · {{ total }} exibido(s) com o filtro atual{% endif %}
+    {%- if q or status or etapa %} · {{ total }} exibido(s) com o filtro atual{% endif %}
 </p>
 
 <div class="grid">
@@ -51,9 +51,18 @@
             <option value="nao_verificado" {{ "selected" if status == "nao_verificado" }}>Não verificado</option>
         </select>
     </div>
+    <div class="filtro-campo">
+        <label for="etapa">Etapa do Lead</label>
+        <select id="etapa" name="etapa">
+            <option value="" {{ "selected" if not etapa }}>Todas</option>
+            {% for chave, rotulo in etapa_rotulos.items() %}
+            <option value="{{ chave }}" {{ "selected" if etapa == chave }}>{{ rotulo }}</option>
+            {% endfor %}
+        </select>
+    </div>
     <button type="submit" class="secondary">Filtrar</button>
-    {% if q or status %}<a class="link-arrow" href="{{ url_for('eventos.inscritos', event_id=evento.id) }}">Limpar filtro</a>{% endif %}
-    <a class="link-arrow" href="{{ url_for('eventos.exportar_inscritos_csv', event_id=evento.id, q=q, status=status) }}">Exportar CSV →</a>
+    {% if q or status or etapa %}<a class="link-arrow" href="{{ url_for('eventos.inscritos', event_id=evento.id) }}">Limpar filtro</a>{% endif %}
+    <a class="link-arrow" href="{{ url_for('eventos.exportar_inscritos_csv', event_id=evento.id, q=q, status=status, etapa=etapa) }}">Exportar CSV →</a>
 </form>
 
 <div class="table-wrap">
@@ -61,7 +70,7 @@
     <thead>
         <tr>
             <th>Inscrito</th><th>Contato</th><th>Cliente</th><th>Match</th>
-            <th>Encontrado em</th><th>Check-in</th><th>Bitrix</th><th>Ações</th>
+            <th>Encontrado em</th><th>Check-in</th><th>Bitrix</th><th>Etapa do Lead</th><th>Ações</th>
         </tr>
     </thead>
     <tbody>
@@ -96,12 +105,16 @@
                 {% endif %}
             </td>
             <td>
+                {% if l.etapa_rotulo %}<small>{{ l.etapa_rotulo }}</small>{% else %}–{% endif %}
+            </td>
+            <td>
                 <div class="actions-stack">
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('eventos.reprocessar_inscrito', event_id=evento.id, participant_id=l.participant_id) }}">
                         <input type="hidden" name="page" value="{{ page }}">
                         <input type="hidden" name="q" value="{{ q }}">
                         <input type="hidden" name="status" value="{{ status }}">
+                        <input type="hidden" name="etapa" value="{{ etapa }}">
                         <button type="submit" class="secondary" title="Refaz o match deste inscrito (CPF → telefone → e-mail → nome) e atualiza o card no Bitrix. Não reenvia campos que já estão certos nem move o Lead de estágio.">Reprocessar</button>
                     </form>
                 </div>
@@ -109,16 +122,16 @@
             </td>
         </tr>
         {% else %}
-        <tr><td colspan="8">Nenhum inscrito encontrado.</td></tr>
+        <tr><td colspan="9">Nenhum inscrito encontrado.</td></tr>
         {% endfor %}
     </tbody>
 </table>
 </div>
 
 <ul class="pagination">
-    {% if page > 1 %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page-1, q=q, status=status) }}">← Anterior</a></li>{% endif %}
+    {% if page > 1 %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page-1, q=q, status=status, etapa=etapa) }}">← Anterior</a></li>{% endif %}
     <li><small>página {{ page }} de {{ total_paginas }}</small></li>
-    {% if page < total_paginas %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page+1, q=q, status=status) }}">Próxima →</a></li>{% endif %}
+    {% if page < total_paginas %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page+1, q=q, status=status, etapa=etapa) }}">Próxima →</a></li>{% endif %}
 </ul>
 
 <p class="mt-lg"><a class="link-arrow" href="{{ url_for('eventos.index') }}">← Voltar para Eventos</a></p>

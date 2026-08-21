@@ -13,7 +13,7 @@ import math
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
 from common import find_leads_by_evento_item, get_sympla_all_participants, spa_find_item_by_sympla_event_id
-from domain.funil_conversao import resumo_funil
+from domain.funil_conversao import classificar_lead, resumo_funil
 from repositories import eventos_config_repo, processed_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
 from services import config_service
@@ -102,13 +102,26 @@ def toggle(event_id):
     return redirect(url_for("eventos.index"))
 
 
+_ETAPA_ROTULOS = {
+    "inscrito": "Inscrito pro evento",
+    "pos_evento": "Pós Evento",
+    "reuniao": "Reunião marcada",
+    "convertido": "Negócio gerado",
+    "perdido": "Perdido (Lead Perdido)",
+    "fora_do_funil": "Fora do funil novo",
+}
+
+
 def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
     """Busca tudo que a aba Inscritos precisa: o evento, os participantes
     ao vivo da Sympla juntados com o resultado do match persistido
     (build_inscritos_view), e o funil de conversão (Leads vinculados ao
-    item da SPA "Eventos Sympla" — domain/funil_conversao.py). Reusado
-    pela tela (GET /inscritos) e pela exportação CSV, pra não duplicar
-    busca+join+funil em dois lugares.
+    item da SPA "Eventos Sympla" — domain/funil_conversao.py). A MESMA
+    busca de Leads alimenta o resumo agregado (funil) E a etapa individual
+    de cada linha (linha["etapa_bucket"]/["etapa_rotulo"], usados pelo
+    filtro ?etapa=) — uma chamada só ao Bitrix, não duas. Reusado pela tela
+    (GET /inscritos) e pela exportação CSV, pra não duplicar busca+join+
+    funil em dois lugares.
 
     Levanta ValueError se o evento não existir na Sympla (via
     get_event_or_raise) — quem chama decide o redirect. As outras leituras
@@ -143,18 +156,27 @@ def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
             linha["lead_url"] = lead_url(linha["lead_id"])
         if linha["contact_ids_duplicados"]:
             linha["contact_urls_duplicados"] = [contact_url(cid) for cid in linha["contact_ids_duplicados"]]
+        linha["etapa_bucket"] = None
+        linha["etapa_rotulo"] = None
 
     funil = None
     try:
         item = spa_find_item_by_sympla_event_id(event_id)
         if item:
             leads = find_leads_by_evento_item(int(item["id"]))
-            funil = resumo_funil(
-                leads,
-                config_service.get_stage_inscrito_pro_evento(),
-                config_service.get_stage_pos_evento(),
-                config_service.get_stage_reuniao(),
-            )
+            stage_inscrito = config_service.get_stage_inscrito_pro_evento()
+            stage_pos_evento = config_service.get_stage_pos_evento()
+            stage_reuniao = config_service.get_stage_reuniao()
+
+            funil = resumo_funil(leads, stage_inscrito, stage_pos_evento, stage_reuniao)
+
+            status_by_lead_id = {str(l["ID"]): l.get("STATUS_ID") for l in leads}
+            for linha in linhas:
+                status_id = status_by_lead_id.get(str(linha["lead_id"])) if linha["lead_id"] else None
+                if status_id is not None:
+                    bucket = classificar_lead(status_id, stage_inscrito, stage_pos_evento, stage_reuniao)
+                    linha["etapa_bucket"] = bucket
+                    linha["etapa_rotulo"] = _ETAPA_ROTULOS[bucket]
     except Exception as exc:
         log.warning("Falha ao montar funil de conversão de %s: %s", event_id, exc)
 
@@ -180,9 +202,13 @@ def inscritos(event_id):
     participantes_processados (persistido no momento da sincronização —
     migração 0006), não recalculado aqui.
 
-    ?q=/?status= filtram a LISTAGEM (interface/inscritos_helper.py::
+    ?q=/?status=/?etapa= filtram a LISTAGEM (interface/inscritos_helper.py::
     filter_linhas) — o resumo/funil continuam sobre o evento inteiro, pra
-    filtrar não dar a impressão de que a taxa de conversão mudou.
+    filtrar não dar a impressão de que a taxa de conversão mudou. etapa é
+    o bucket do funil do Lead vinculado (inscrito/pos_evento/reuniao/
+    convertido/perdido/fora_do_funil), independente de status (cliente/
+    prospect/não verificado): um inscrito pode ser cliente com o Lead em
+    qualquer etapa.
 
     Paginação em memória (não Supabase offset/limit): a lista inteira já
     precisa vir da Sympla mesmo pro cálculo da taxa de conversão."""
@@ -194,7 +220,8 @@ def inscritos(event_id):
 
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
-    linhas_filtradas = filter_linhas(linhas, q=q, status=status)
+    etapa = request.args.get("etapa", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa)
 
     resumo = resumo_conversao(linhas)
 
@@ -205,9 +232,9 @@ def inscritos(event_id):
 
     return render_template(
         "evento_detalhe.html", evento=evento_view, linhas=pagina, resumo=resumo,
-        funil=funil, funil_barras=montar_funil_barras(funil),
+        funil=funil, funil_barras=montar_funil_barras(funil), etapa_rotulos=_ETAPA_ROTULOS,
         page=page, total_paginas=total_paginas, total=len(linhas_filtradas), total_geral=len(linhas),
-        q=q, status=status,
+        q=q, status=status, etapa=etapa,
     )
 
 
@@ -215,7 +242,7 @@ def inscritos(event_id):
 @login_required
 def exportar_inscritos_csv(event_id):
     """Exporta em CSV exatamente o que a tela de Inscritos está mostrando
-    (respeita ?q=/?status=, sem paginação) — colunas alinhadas com
+    (respeita ?q=/?status=/?etapa=, sem paginação) — colunas alinhadas com
     interface/inscritos_helper.py::build_inscritos_view. BOM UTF-8 no
     início pra abrir certo no Excel (que sem isso interpreta como
     Latin-1 e quebra acentuação)."""
@@ -227,15 +254,16 @@ def exportar_inscritos_csv(event_id):
 
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
-    linhas_filtradas = filter_linhas(linhas, q=q, status=status)
+    etapa = request.args.get("etapa", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
+    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "etapa_lead", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
     for l in linhas_filtradas:
         writer.writerow([
             l["participant_id"], l["nome"], l["email"], l["telefone"], l["cpf"], l["status"],
-            l["match_method"] or "", l["processado_em"] or "", l["verificado_em"] or "",
+            l["match_method"] or "", l["etapa_rotulo"] or "", l["processado_em"] or "", l["verificado_em"] or "",
             l["contact_id"] or "", l["lead_id"] or "", "sim" if l["checkin"] else "não",
         ])
 
@@ -262,7 +290,8 @@ def reprocessar_inscrito(event_id, participant_id):
     page = request.form.get("page", "1")
     q = request.form.get("q", "")
     status = request.form.get("status", "")
-    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page, q=q, status=status)
+    etapa = request.form.get("etapa", "")
+    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page, q=q, status=status, etapa=etapa)
 
     try:
         acquire_lock(event_id, "painel")
