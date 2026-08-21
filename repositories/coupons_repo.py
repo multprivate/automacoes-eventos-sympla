@@ -37,3 +37,24 @@ def upsert_coupon(cupom: str, tipo: str, email_assessor: str | None, origem_cana
 
 def delete_coupon(cupom: str) -> None:
     supabase_client.delete(TABLE, {"cupom": f"eq.{cupom}"})
+
+
+def rename_and_update_coupon(cupom_original: str, cupom_novo: str, tipo: str, email_assessor: str | None, origem_canal: str | None) -> None:
+    """Renomeia um cupom (muda a própria chave primária) e atualiza os
+    demais campos, numa única linha — diferente de upsert_coupon, que
+    sempre grava por cima do `cupom` recebido: se o texto do cupom
+    mudou, upsert deixaria a linha antiga órfã pra trás (chave antiga
+    continuaria existindo com o dado velho) em vez de renomear.
+
+    Propaga erro de violação de unicidade se `cupom_novo` já existir
+    (outro cupom com o mesmo texto) — quem chama decide a mensagem."""
+    supabase_client.update(
+        TABLE,
+        {"cupom": f"eq.{cupom_original}"},
+        {
+            "cupom": cupom_novo,
+            "tipo": tipo,
+            "email_assessor": email_assessor if tipo == "assessor" else None,
+            "origem_canal": origem_canal if tipo == "canal" else None,
+        },
+    )

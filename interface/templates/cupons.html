@@ -43,8 +43,10 @@
 {% endif %}
 <section class="form-card">
 <form method="post" action="{{ url_for('cupons.salvar') }}">
+    {% if editando %}<input type="hidden" name="cupom_original" value="{{ editando.cupom }}">{% endif %}
     <label for="cupom">Cupom (mesmo formato que a Sympla manda, ex: "100.00% - NOME")</label>
-    <input type="text" id="cupom" name="cupom" value="{{ editando.cupom if editando else '' }}" {{ "readonly" if editando }} required>
+    <input type="text" id="cupom" name="cupom" value="{{ editando.cupom if editando else '' }}" required>
+    {% if editando %}<small>Mudar o texto aqui renomeia o cupom (não cria um segundo).</small>{% endif %}
 
     <label for="tipo">Tipo</label>
     <select id="tipo" name="tipo" required>

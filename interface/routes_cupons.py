@@ -43,6 +43,7 @@ def index():
 @login_required
 def salvar():
     cupom = request.form.get("cupom", "").strip().upper()
+    cupom_original = request.form.get("cupom_original", "").strip()
     tipo = request.form.get("tipo", "")
     email_assessor = request.form.get("email_assessor", "").strip() or None
     origem_canal = request.form.get("origem_canal", "").strip() or None
@@ -57,7 +58,19 @@ def salvar():
         flash("Tipo 'canal' precisa do texto da Origem.", "erro")
         return redirect(url_for("cupons.index"))
 
-    coupons_repo.upsert_coupon(cupom, tipo, email_assessor, origem_canal)
+    try:
+        if cupom_original and cupom_original != cupom:
+            # Editando um cupom já existente e o texto mudou: renomeia de
+            # verdade (muda a chave primária) em vez de upsert, que
+            # deixaria a linha antiga órfã pra trás com o cupom_original.
+            coupons_repo.rename_and_update_coupon(cupom_original, cupom, tipo, email_assessor, origem_canal)
+        else:
+            coupons_repo.upsert_coupon(cupom, tipo, email_assessor, origem_canal)
+    except Exception as exc:
+        log.error("Falha ao salvar cupom '%s' (original: '%s'): %s", cupom, cupom_original, exc)
+        flash(f"Falha ao salvar o cupom '{cupom}' — já existe outro cupom com esse texto? Detalhe: {exc}", "erro")
+        return redirect(url_for("cupons.index"))
+
     coupon_service.load_coupon_maps(force_refresh=True)
     flash(f"Cupom '{cupom}' salvo.", "ok")
     return redirect(url_for("cupons.index"))
