@@ -52,6 +52,46 @@ def build_inscritos_view(participants: list[dict], resultados: dict[str, dict]) 
     return linhas
 
 
+FUNIL_ETAPAS = [
+    ("inscrito", "Inscritos pro evento"),
+    ("pos_evento", "Pós Evento"),
+    ("reuniao", "Reunião marcada"),
+    ("convertido", "Negócio gerado"),
+]
+
+
+def montar_funil_barras(funil: dict | None) -> list[dict] | None:
+    """Formata o resumo_funil (domain/funil_conversao.py) pras 4 barras da
+    tela: rótulo + valor + % de largura relativa ao primeiro degrau
+    (Inscritos pro evento, sempre o maior — funil cumulativo, ver
+    domain/funil_conversao.py). None quando não há dado de funil (evento
+    nunca vinculado à SPA "Eventos Sympla", ou falha ao consultar o
+    Bitrix) — a tela mostra um aviso no lugar das barras."""
+    if funil is None:
+        return None
+    base = funil["inscrito"] or 1
+    return [
+        {"chave": chave, "rotulo": rotulo, "valor": funil[chave], "pct": round(100 * funil[chave] / base)}
+        for chave, rotulo in FUNIL_ETAPAS
+    ]
+
+
+def filter_linhas(linhas: list[dict], q: str = "", status: str = "") -> list[dict]:
+    """Filtro server-side pra aba Inscritos — `q` casa substring (sem
+    diferenciar maiúsculas) em nome OU e-mail; `status` casa exato contra
+    "cliente"/"prospect"/"nao_verificado". Os dois em branco = não filtra
+    nada. Aplicado só na LISTAGEM — o resumo/funil da tela continuam
+    calculados sobre o evento inteiro (interface/routes_eventos.py), pra
+    filtrar não dar a impressão de que a taxa de conversão mudou."""
+    resultado = linhas
+    if q:
+        termo = q.strip().lower()
+        resultado = [l for l in resultado if termo in l["nome"].lower() or termo in l["email"].lower()]
+    if status:
+        resultado = [l for l in resultado if l["status"] == status]
+    return resultado
+
+
 def resumo_conversao(linhas: list[dict]) -> dict:
     """{total, clientes, prospects, nao_verificados, taxa_pct}. taxa_pct
     usa como denominador só os VERIFICADOS (clientes + prospects), não o

@@ -1,4 +1,4 @@
-from interface.inscritos_helper import build_inscritos_view, resumo_conversao
+from interface.inscritos_helper import build_inscritos_view, filter_linhas, montar_funil_barras, resumo_conversao
 
 
 def _participant(pid: str, nome="Fulano Teste", email="fulano@example.com", checked_in=False) -> dict:
@@ -65,6 +65,57 @@ def test_checkin_extraido_do_participante():
     linhas = build_inscritos_view([_participant("1", checked_in=True), _participant("2", checked_in=False)], resultados={})
     assert linhas[0]["checkin"] is True
     assert linhas[1]["checkin"] is False
+
+
+class TestMontarFunilBarras:
+    def test_nenhum_dado_retorna_none(self):
+        assert montar_funil_barras(None) is None
+
+    def test_percentuais_relativos_ao_primeiro_degrau(self):
+        funil = {"inscrito": 10, "pos_evento": 8, "reuniao": 4, "convertido": 2, "perdido": 1, "fora_do_funil": 0, "total": 11}
+        barras = montar_funil_barras(funil)
+
+        assert [b["chave"] for b in barras] == ["inscrito", "pos_evento", "reuniao", "convertido"]
+        assert barras[0] == {"chave": "inscrito", "rotulo": "Inscritos pro evento", "valor": 10, "pct": 100}
+        assert barras[1]["pct"] == 80
+        assert barras[2]["pct"] == 40
+        assert barras[3]["pct"] == 20
+
+    def test_sem_ninguem_inscrito_nao_divide_por_zero(self):
+        funil = {"inscrito": 0, "pos_evento": 0, "reuniao": 0, "convertido": 0, "perdido": 0, "fora_do_funil": 0, "total": 0}
+        barras = montar_funil_barras(funil)
+        assert all(b["pct"] == 0 for b in barras)
+
+
+class TestFilterLinhas:
+    def _linhas(self):
+        return [
+            {"nome": "Karine Gomes", "email": "karine@example.com", "status": "prospect"},
+            {"nome": "Paulo Salim", "email": "paulo@example.com", "status": "cliente"},
+            {"nome": "Elienai Luz", "email": "elienai@hotmail.com", "status": "cliente"},
+        ]
+
+    def test_sem_filtro_retorna_tudo(self):
+        assert filter_linhas(self._linhas()) == self._linhas()
+
+    def test_filtra_por_nome_parcial_case_insensitive(self):
+        resultado = filter_linhas(self._linhas(), q="karine")
+        assert [l["nome"] for l in resultado] == ["Karine Gomes"]
+
+    def test_filtra_por_email_parcial(self):
+        resultado = filter_linhas(self._linhas(), q="hotmail")
+        assert [l["nome"] for l in resultado] == ["Elienai Luz"]
+
+    def test_filtra_por_status(self):
+        resultado = filter_linhas(self._linhas(), status="cliente")
+        assert {l["nome"] for l in resultado} == {"Paulo Salim", "Elienai Luz"}
+
+    def test_combina_busca_e_status(self):
+        resultado = filter_linhas(self._linhas(), q="e", status="cliente")
+        assert {l["nome"] for l in resultado} == {"Paulo Salim", "Elienai Luz"}
+
+    def test_sem_resultado(self):
+        assert filter_linhas(self._linhas(), q="ninguem-com-esse-nome") == []
 
 
 class TestResumoConversao:

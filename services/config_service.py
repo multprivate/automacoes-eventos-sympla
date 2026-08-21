@@ -25,6 +25,7 @@ from common import (
     FIELD_SYMPLA_EVENT_ID,
     STAGE_INSCRITO_PRO_EVENTO,
     STAGE_POS_EVENTO,
+    STAGE_REUNIAO,
 )
 from repositories import config_repo
 from repositories.supabase_client import SupabaseUnavailable
@@ -44,6 +45,7 @@ _DEFAULTS = {
     "FIELD_CPF_CONTACT": FIELD_CPF_CONTACT,
     "STAGE_INSCRITO_PRO_EVENTO": STAGE_INSCRITO_PRO_EVENTO,
     "STAGE_POS_EVENTO": STAGE_POS_EVENTO,
+    "STAGE_REUNIAO": STAGE_REUNIAO,
 }
 
 _cache: dict[str, str] | None = None
@@ -111,3 +113,7 @@ def get_stage_inscrito_pro_evento() -> str:
 
 def get_stage_pos_evento() -> str:
     return load_config()["STAGE_POS_EVENTO"]
+
+
+def get_stage_reuniao() -> str:
+    return load_config()["STAGE_REUNIAO"]

@@ -3,7 +3,10 @@
 {% block content %}
 <p class="eyebrow">Sincronização</p>
 <h2>{{ evento.nome }}</h2>
-<p class="page-subtitle">{{ evento.data }} · <code>{{ evento.id }}</code> · {{ total }} inscrito(s)</p>
+<p class="page-subtitle">
+    {{ evento.data }} · <code>{{ evento.id }}</code> · {{ total_geral }} inscrito(s)
+    {%- if q or status %} · {{ total }} exibido(s) com o filtro atual{% endif %}
+</p>
 
 <div class="grid">
     <article><p>Inscritos</p><h4>{{ resumo.total }}</h4></article>
@@ -15,6 +18,43 @@
     </article>
     <article><p>Não verificados</p><h4>{{ resumo.nao_verificados }}</h4></article>
 </div>
+
+<h3>Funil de Conversão</h3>
+{% if funil_barras %}
+<div class="funil">
+    {% for b in funil_barras %}
+    <div class="funil-etapa">
+        <div class="funil-rotulo"><span>{{ b.rotulo }}</span><strong>{{ b.valor }}</strong></div>
+        <div class="funil-barra-fundo"><div class="funil-barra" style="width: {{ b.pct }}%"></div></div>
+    </div>
+    {% endfor %}
+</div>
+<p class="page-subtitle mt-lg">
+    <small>{{ funil.perdido }} perdido(s) (Lead Perdido) · {{ funil.fora_do_funil }} vinculado(s) fora do funil novo — não contam nos degraus acima.</small>
+</p>
+{% else %}
+<p class="page-subtitle">Sem dados do funil ainda — evento ainda não vinculado à SPA "Eventos Sympla" no Bitrix (sincronize o evento pelo menos uma vez), ou falha ao consultar o Bitrix agora.</p>
+{% endif %}
+
+<h3>Inscritos</h3>
+<form method="get" class="filtro-inscritos">
+    <div class="filtro-campo">
+        <label for="q">Buscar por nome ou e-mail</label>
+        <input type="text" id="q" name="q" value="{{ q }}" placeholder="ex: Karine">
+    </div>
+    <div class="filtro-campo">
+        <label for="status">Status</label>
+        <select id="status" name="status">
+            <option value="" {{ "selected" if not status }}>Todos</option>
+            <option value="cliente" {{ "selected" if status == "cliente" }}>Cliente</option>
+            <option value="prospect" {{ "selected" if status == "prospect" }}>Prospect</option>
+            <option value="nao_verificado" {{ "selected" if status == "nao_verificado" }}>Não verificado</option>
+        </select>
+    </div>
+    <button type="submit" class="secondary">Filtrar</button>
+    {% if q or status %}<a class="link-arrow" href="{{ url_for('eventos.inscritos', event_id=evento.id) }}">Limpar filtro</a>{% endif %}
+    <a class="link-arrow" href="{{ url_for('eventos.exportar_inscritos_csv', event_id=evento.id, q=q, status=status) }}">Exportar CSV →</a>
+</form>
 
 <div class="table-wrap">
 <table class="inscritos-table">
@@ -60,6 +100,8 @@
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('eventos.reprocessar_inscrito', event_id=evento.id, participant_id=l.participant_id) }}">
                         <input type="hidden" name="page" value="{{ page }}">
+                        <input type="hidden" name="q" value="{{ q }}">
+                        <input type="hidden" name="status" value="{{ status }}">
                         <button type="submit" class="secondary" title="Refaz o match deste inscrito (CPF → telefone → e-mail → nome) e atualiza o card no Bitrix. Não reenvia campos que já estão certos nem move o Lead de estágio.">Reprocessar</button>
                     </form>
                 </div>
@@ -74,9 +116,9 @@
 </div>
 
 <ul class="pagination">
-    {% if page > 1 %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page-1) }}">← Anterior</a></li>{% endif %}
+    {% if page > 1 %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page-1, q=q, status=status) }}">← Anterior</a></li>{% endif %}
     <li><small>página {{ page }} de {{ total_paginas }}</small></li>
-    {% if page < total_paginas %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page+1) }}">Próxima →</a></li>{% endif %}
+    {% if page < total_paginas %}<li><a href="{{ url_for('eventos.inscritos', event_id=evento.id, page=page+1, q=q, status=status) }}">Próxima →</a></li>{% endif %}
 </ul>
 
 <p class="mt-lg"><a class="link-arrow" href="{{ url_for('eventos.index') }}">← Voltar para Eventos</a></p>

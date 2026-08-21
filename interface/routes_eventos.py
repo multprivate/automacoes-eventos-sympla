@@ -5,14 +5,18 @@ Sincronizar agora, Forçar atualização de campos, Remover — mais o toggle
 Ativo/Inativo.
 """
 
+import csv
+import io
 import logging
 import math
 
-from flask import Blueprint, flash, redirect, render_template, request, url_for
+from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
-from common import get_sympla_all_participants
+from common import find_leads_by_evento_item, get_sympla_all_participants, spa_find_item_by_sympla_event_id
+from domain.funil_conversao import resumo_funil
 from repositories import eventos_config_repo, processed_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
+from services import config_service
 from services.lead_sync_service import (
     find_or_create_evento_item,
     get_event_or_raise,
@@ -25,7 +29,7 @@ from services.lead_sync_service import (
 from .auth import login_required
 from .bitrix_links import contact_url, lead_url
 from .eventos_helper import list_all_events_view
-from .inscritos_helper import build_inscritos_view, resumo_conversao
+from .inscritos_helper import build_inscritos_view, filter_linhas, montar_funil_barras, resumo_conversao
 
 log = logging.getLogger("interface.eventos")
 
@@ -98,26 +102,24 @@ def toggle(event_id):
     return redirect(url_for("eventos.index"))
 
 
-@eventos_bp.route("/<event_id>/inscritos")
-@login_required
-def inscritos(event_id):
-    """Lista todo inscrito do evento: id na Sympla, se já era cliente
-    (Contato) no Bitrix e por qual sinal, e quando foi encontrado.
+def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
+    """Busca tudo que a aba Inscritos precisa: o evento, os participantes
+    ao vivo da Sympla juntados com o resultado do match persistido
+    (build_inscritos_view), e o funil de conversão (Leads vinculados ao
+    item da SPA "Eventos Sympla" — domain/funil_conversao.py). Reusado
+    pela tela (GET /inscritos) e pela exportação CSV, pra não duplicar
+    busca+join+funil em dois lugares.
 
-    Nome/e-mail/telefone/CPF/check-in vêm AO VIVO da Sympla a cada
-    visita — mesmo custo que a sincronização já paga a cada rodada
-    (get_sympla_all_participants pagina a lista inteira, ~0.3s por
-    página), sem armazenamento novo. "Cliente ou não" vem de
-    participantes_processados (persistido no momento da sincronização —
-    migração 0006), não recalculado aqui.
+    Levanta ValueError se o evento não existir na Sympla (via
+    get_event_or_raise) — quem chama decide o redirect. As outras leituras
+    falham ABERTO (flash de aviso, segue com dado parcial): perder o funil
+    ou o resultado do match não deveria impedir de ver a lista de
+    inscritos.
 
-    Paginação em memória (não Supabase offset/limit): a lista inteira já
-    precisa vir da Sympla mesmo pro cálculo da taxa de conversão."""
-    try:
-        event = get_event_or_raise(event_id)
-    except ValueError as exc:
-        flash(str(exc), "erro")
-        return redirect(url_for("eventos.index"))
+    Usa spa_find_item_by_sympla_event_id (busca READ-ONLY) pro funil, não
+    find_or_create_evento_item — essa página só lê, não deveria ter o
+    efeito colateral de criar/atualizar o item da SPA a cada visita."""
+    event = get_event_or_raise(event_id)
 
     try:
         participants = get_sympla_all_participants(event_id)
@@ -142,22 +144,104 @@ def inscritos(event_id):
         if linha["contact_ids_duplicados"]:
             linha["contact_urls_duplicados"] = [contact_url(cid) for cid in linha["contact_ids_duplicados"]]
 
-    resumo = resumo_conversao(linhas)
-
-    page = max(int(request.args.get("page", 1)), 1)
-    total_paginas = max(1, math.ceil(len(linhas) / INSCRITOS_PAGE_SIZE))
-    page = min(page, total_paginas)
-    pagina = linhas[(page - 1) * INSCRITOS_PAGE_SIZE : page * INSCRITOS_PAGE_SIZE]
+    funil = None
+    try:
+        item = spa_find_item_by_sympla_event_id(event_id)
+        if item:
+            leads = find_leads_by_evento_item(int(item["id"]))
+            funil = resumo_funil(
+                leads,
+                config_service.get_stage_inscrito_pro_evento(),
+                config_service.get_stage_pos_evento(),
+                config_service.get_stage_reuniao(),
+            )
+    except Exception as exc:
+        log.warning("Falha ao montar funil de conversão de %s: %s", event_id, exc)
 
     evento_view = {
         "id": event_id,
         "nome": event.get("name", ""),
         "data": (event.get("start_date") or "")[:10],
     }
+    return evento_view, linhas, funil
+
+
+@eventos_bp.route("/<event_id>/inscritos")
+@login_required
+def inscritos(event_id):
+    """Lista todo inscrito do evento: id na Sympla, se já era cliente
+    (Contato) no Bitrix e por qual sinal, quando foi encontrado, e o
+    funil de conversão (Inscrito → Pós Evento → Reunião → Negócio).
+
+    Nome/e-mail/telefone/CPF/check-in vêm AO VIVO da Sympla a cada
+    visita — mesmo custo que a sincronização já paga a cada rodada
+    (get_sympla_all_participants pagina a lista inteira, ~0.3s por
+    página), sem armazenamento novo. "Cliente ou não" vem de
+    participantes_processados (persistido no momento da sincronização —
+    migração 0006), não recalculado aqui.
+
+    ?q=/?status= filtram a LISTAGEM (interface/inscritos_helper.py::
+    filter_linhas) — o resumo/funil continuam sobre o evento inteiro, pra
+    filtrar não dar a impressão de que a taxa de conversão mudou.
+
+    Paginação em memória (não Supabase offset/limit): a lista inteira já
+    precisa vir da Sympla mesmo pro cálculo da taxa de conversão."""
+    try:
+        evento_view, linhas, funil = _montar_dados_evento(event_id)
+    except ValueError as exc:
+        flash(str(exc), "erro")
+        return redirect(url_for("eventos.index"))
+
+    q = request.args.get("q", "").strip()
+    status = request.args.get("status", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status)
+
+    resumo = resumo_conversao(linhas)
+
+    page = max(int(request.args.get("page", 1)), 1)
+    total_paginas = max(1, math.ceil(len(linhas_filtradas) / INSCRITOS_PAGE_SIZE))
+    page = min(page, total_paginas)
+    pagina = linhas_filtradas[(page - 1) * INSCRITOS_PAGE_SIZE : page * INSCRITOS_PAGE_SIZE]
+
     return render_template(
         "evento_detalhe.html", evento=evento_view, linhas=pagina, resumo=resumo,
-        page=page, total_paginas=total_paginas, total=len(linhas),
+        funil=funil, funil_barras=montar_funil_barras(funil),
+        page=page, total_paginas=total_paginas, total=len(linhas_filtradas), total_geral=len(linhas),
+        q=q, status=status,
     )
+
+
+@eventos_bp.route("/<event_id>/inscritos/exportar.csv")
+@login_required
+def exportar_inscritos_csv(event_id):
+    """Exporta em CSV exatamente o que a tela de Inscritos está mostrando
+    (respeita ?q=/?status=, sem paginação) — colunas alinhadas com
+    interface/inscritos_helper.py::build_inscritos_view. BOM UTF-8 no
+    início pra abrir certo no Excel (que sem isso interpreta como
+    Latin-1 e quebra acentuação)."""
+    try:
+        _, linhas, _ = _montar_dados_evento(event_id)
+    except ValueError as exc:
+        flash(str(exc), "erro")
+        return redirect(url_for("eventos.index"))
+
+    q = request.args.get("q", "").strip()
+    status = request.args.get("status", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status)
+
+    buffer = io.StringIO()
+    writer = csv.writer(buffer)
+    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
+    for l in linhas_filtradas:
+        writer.writerow([
+            l["participant_id"], l["nome"], l["email"], l["telefone"], l["cpf"], l["status"],
+            l["match_method"] or "", l["processado_em"] or "", l["verificado_em"] or "",
+            l["contact_id"] or "", l["lead_id"] or "", "sim" if l["checkin"] else "não",
+        ])
+
+    resposta = Response("﻿" + buffer.getvalue(), content_type="text/csv; charset=utf-8")
+    resposta.headers["Content-Disposition"] = f"attachment; filename=inscritos_{event_id}.csv"
+    return resposta
 
 
 @eventos_bp.route("/<event_id>/inscritos/<participant_id>/reprocessar", methods=["POST"])
@@ -176,7 +260,9 @@ def reprocessar_inscrito(event_id, participant_id):
     Lead já vinculado porque a busca depende do item_id). Bug pré-existente
     no motor, não introduzido por esta rota — só evitado aqui."""
     page = request.form.get("page", "1")
-    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page)
+    q = request.form.get("q", "")
+    status = request.form.get("status", "")
+    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page, q=q, status=status)
 
     try:
         acquire_lock(event_id, "painel")

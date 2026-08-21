@@ -7,7 +7,7 @@ transitória, via common._retry).
 import logging
 
 from ._retry import request_with_retry
-from .constants import BITRIX_WEBHOOK_URL
+from .constants import BITRIX_WEBHOOK_URL, FIELD_PARENT_ID_EVENTO_SPA
 from .normalization import normalize_email
 
 log = logging.getLogger("common.bitrix_client")
@@ -104,6 +104,15 @@ def _find_ids_by_cpf(list_method: str, cpf_digits: str, field_code: str) -> list
 
 def find_lead_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
     return _find_ids_by_cpf("crm.lead.list", cpf_digits, field_code)
+
+
+def find_leads_by_evento_item(item_id: int) -> list[dict]:
+    """Todo Lead vinculado a este item da SPA "Eventos Sympla" (mesmo
+    campo FIELD_PARENT_ID_EVENTO_SPA que services/lead_sync_service.py
+    usa pra vincular na hora de criar/atualizar) — usado pelo funil de
+    conversão da aba Inscritos (domain/funil_conversao.py). Traz só
+    ID/STATUS_ID, o suficiente pra classificar cada Lead num degrau."""
+    return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID"]})
 
 
 def find_contact_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:

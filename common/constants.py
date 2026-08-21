@@ -30,6 +30,12 @@ STAGES_SAFE_TO_ADVANCE = {"NEWLEAD", "NEWFUP"}
 # ver domain/stage_rules.py::deve_mover_pos_evento.
 STAGE_POS_EVENTO = os.environ.get("BITRIX_STAGE_POS_EVENTO", "NEWPOSEVENTO")
 
+# Estágio "Reunião" do funil novo — usado só pelo funil de conversão da
+# aba Inscritos (domain/funil_conversao.py), pra saber quantos inscritos
+# de um evento chegaram até aqui (ou além). Não é tocado por nenhuma
+# automação de escrita, só leitura pra estatística.
+STAGE_REUNIAO = os.environ.get("BITRIX_STAGE_REUNIAO", "UC_TJ9FPC")
+
 # Estágios do funil antigo (pré-reformulação do pipeline) — um Lead nesses
 # estágios pode ganhar os campos de evento (Data/Nome/ID Sympla) quando
 # bate uma inscrição nova, pra dar visibilidade, mas o STATUS_ID nunca

@@ -190,6 +190,24 @@ small { color: var(--color-text-muted); }
 .grid article .badge { align-self: flex-start; }
 .stat-danger { color: var(--color-danger); }
 
+/* Funil de conversão (aba Inscritos) ----------------------------------*/
+.funil { display: flex; flex-direction: column; gap: .85rem; margin-bottom: 1.25rem; }
+.funil-etapa { display: flex; flex-direction: column; gap: .3rem; }
+.funil-rotulo { display: flex; justify-content: space-between; align-items: baseline; font-size: .88rem; }
+.funil-rotulo span { color: var(--color-text-muted); font-weight: 600; }
+.funil-rotulo strong { font-size: 1.15rem; font-weight: 800; font-variant-numeric: tabular-nums; }
+.funil-barra-fundo { background: var(--color-neutral-bg); border-radius: var(--radius-pill); height: .6rem; overflow: hidden; }
+.funil-barra { background: var(--color-primary); height: 100%; border-radius: var(--radius-pill); transition: width .2s ease; }
+/* Último degrau (Negócio gerado) em dourado — é a meta, mesma reserva de
+   cor usada no resto do painel (dourado só pra destacar o que importa). */
+.funil-etapa:last-child .funil-barra { background: var(--color-accent); }
+
+/* Filtro da aba Inscritos ------------------------------------------------*/
+.filtro-inscritos { display: flex; flex-wrap: wrap; align-items: flex-end; gap: .75rem; margin-bottom: 1.25rem; }
+.filtro-campo label { margin: 0 0 .35rem; }
+.filtro-campo input[type=text] { max-width: 220px; }
+.filtro-campo select { max-width: 170px; }
+
 /* Tabelas -----------------------------------------------------------------*/
 .table-wrap {
     width: 100%;
@@ -296,10 +314,11 @@ button:disabled:active { transform: none; }
    de tratá-la como célula de tabela de verdade: vertical-align:middle
    (herdado de "tbody td") deixa de valer, e a caixa flex nem estica pra
    altura da linha, então justify-content:center também não tem efeito
-   nenhum. Com o flex numa div comum dentro da <td>, ela continua sendo
-   uma célula real — a <td> (ainda com padding/etc de .actions-cell) fica
-   alta o tanto que a linha pedir, e o vertical-align:middle da tabela
-   centraliza essa div (curta) dentro dela, igual as outras colunas. */
+   nenhum. Com o flex numa div comum dentro da <td> (sem classe, ou
+   qualquer classe que não mude o display), ela continua sendo uma
+   célula real — fica alta o tanto que a linha pedir, e o
+   vertical-align:middle da tabela centraliza essa div (curta) dentro
+   dela, igual as outras colunas. */
 .actions-stack { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
 .actions-stack form { margin: 0; display: inline; }
 .actions-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }

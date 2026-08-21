@@ -35,6 +35,7 @@ _DESCRICOES = {
     "FIELD_CPF_CONTACT": 'Código do campo customizado "CPF" em Contato',
     "STAGE_INSCRITO_PRO_EVENTO": 'Código do estágio "Inscrito Pro Evento" no funil de Leads',
     "STAGE_POS_EVENTO": 'Código do estágio "Pós Evento" no funil de Leads',
+    "STAGE_REUNIAO": 'Código do estágio "Reunião" no funil de Leads (usado só pelo funil de conversão da aba Inscritos)',
 }
 
 
