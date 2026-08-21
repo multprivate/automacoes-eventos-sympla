@@ -30,7 +30,8 @@
                 <span class="badge badge-neutral">pausado</span>
                 {% endif %}
             </td>
-            <td class="actions-cell">
+            <td>
+                <div class="actions-stack">
                 <div class="actions-row">
                     <a href="{{ url_for('eventos.inscritos', event_id=e.id) }}"><button type="button" class="secondary" title="Lista todos os inscritos deste evento: quem já era cliente, por qual sinal bateu e o link pro card no Bitrix.">Ver inscritos</button></a>
                     <form method="post" action="{{ url_for('eventos.sincronizar', event_id=e.id) }}">
@@ -49,6 +50,7 @@
                         <button type="submit" class="danger" title="Remove o evento da gestão automática de vez (não desfaz). Os dados já sincronizados continuam no Bitrix.">Remover</button>
                     </form>
                     {% endif %}
+                </div>
                 </div>
             </td>
         </tr>

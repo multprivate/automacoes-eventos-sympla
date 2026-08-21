@@ -55,12 +55,14 @@
                 <br><span class="badge badge-warning" title="Contatos {{ l.contact_ids_duplicados }} bateram com este inscrito (duplicata pré-existente no Bitrix, não criada pela automação). O de menor ID (#{{ l.contact_id }}) foi o usado. Mesclar Contatos é uma tarefa manual — este painel só sinaliza.">{{ l.contact_ids_duplicados|length }} contatos duplicados</span>
                 {% endif %}
             </td>
-            <td class="actions-cell">
+            <td>
+                <div class="actions-stack">
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('eventos.reprocessar_inscrito', event_id=evento.id, participant_id=l.participant_id) }}">
                         <input type="hidden" name="page" value="{{ page }}">
                         <button type="submit" class="secondary" title="Refaz o match deste inscrito (CPF → telefone → e-mail → nome) e atualiza o card no Bitrix. Não reenvia campos que já estão certos nem move o Lead de estágio.">Reprocessar</button>
                     </form>
+                </div>
                 </div>
             </td>
         </tr>

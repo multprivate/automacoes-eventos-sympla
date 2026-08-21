@@ -290,17 +290,20 @@ button:disabled { opacity: .35; cursor: not-allowed; box-shadow: none; }
 button:disabled:active { transform: none; }
 
 /* Célula de ações com várias linhas (ex: aba Eventos) — botões menores que
-   os de página inteira, agrupados em linhas pra não empilhar sem ordem. */
-/* Em linhas muito altas (ex: nome de inscrito longo demais, quebrando em
-   várias linhas), o vertical-align:middle da célula nem sempre é
-   respeitado por um filho flex (bug conhecido de interação table-cell +
-   flex em alguns navegadores) — o botão fica "grudado" no topo da linha
-   em vez de centralizado como as outras células. justify-content:center
-   força o centro independente disso. */
-.actions-cell { display: flex; flex-direction: column; justify-content: center; gap: .35rem; align-items: flex-start; }
-.actions-cell form { margin: 0; display: inline; }
+   os de página inteira, agrupados em linhas pra não empilhar sem ordem.
+   O flex fica na DIV interna (.actions-stack), não na <td> — colocar
+   display:flex direto na <td> (como estava antes) faz o navegador parar
+   de tratá-la como célula de tabela de verdade: vertical-align:middle
+   (herdado de "tbody td") deixa de valer, e a caixa flex nem estica pra
+   altura da linha, então justify-content:center também não tem efeito
+   nenhum. Com o flex numa div comum dentro da <td>, ela continua sendo
+   uma célula real — a <td> (ainda com padding/etc de .actions-cell) fica
+   alta o tanto que a linha pedir, e o vertical-align:middle da tabela
+   centraliza essa div (curta) dentro dela, igual as outras colunas. */
+.actions-stack { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+.actions-stack form { margin: 0; display: inline; }
 .actions-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
-.actions-cell button { padding: .35rem .7rem; font-size: .78rem; box-shadow: none; }
+.actions-stack button { padding: .35rem .7rem; font-size: .78rem; box-shadow: none; }
 
 /* Forms --------------------------------------------------------------------*/
 label { display: block; font-size: .84rem; font-weight: 600; margin: 1.15rem 0 .4rem; }

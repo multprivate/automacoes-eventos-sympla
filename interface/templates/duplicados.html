@@ -19,7 +19,8 @@
             <td><a href="{{ c.url_b }}" target="_blank" rel="noopener">{{ c.nome_b or "(sem nome)" }} · #{{ c.lead_id_b }}</a></td>
             <td>{{ c.telefone_a }}</td>
             <td>{{ c.criado_em | brt if c.criado_em else "" }}</td>
-            <td class="actions-cell">
+            <td>
+                <div class="actions-stack">
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('duplicados.mesclar', candidato_id=c.id) }}" onsubmit="return confirm('Mesclar estes dois Leads? O secundário será apagado (histórico preservado como comentário no principal).');">
                         <button type="submit" title="Escolhe automaticamente o Lead principal (vínculo com evento &gt; e-mail &gt; mais atividades &gt; mais antigo) e apaga o outro, preservando o histórico como comentário.">Mesclar</button>
@@ -27,6 +28,7 @@
                     <form method="post" action="{{ url_for('duplicados.ignorar_rota', candidato_id=c.id) }}">
                         <button type="submit" class="secondary" title="Marca este par como não-duplicado (ex: mesmo telefone, pessoas diferentes) — não aparece mais nesta lista.">Ignorar</button>
                     </form>
+                </div>
                 </div>
             </td>
         </tr>
