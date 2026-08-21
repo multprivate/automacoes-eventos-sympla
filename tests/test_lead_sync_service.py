@@ -535,7 +535,7 @@ class TestSyncAllUpcomingEventsLock:
         )
 
         result = lead_sync_service.sync_all_upcoming_events()
-        assert result == lead_sync_service._new_stats()
+        assert result == lead_sync_service.new_stats()
 
     def test_adquire_e_libera_a_trava_em_execucao_normal(self, monkeypatch):
         calls = []

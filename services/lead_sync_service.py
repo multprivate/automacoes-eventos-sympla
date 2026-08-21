@@ -83,7 +83,7 @@ from services.coupon_service import resolve_assessor_and_origem
 log = logging.getLogger("services.lead_sync_service")
 
 
-def _new_stats() -> dict:
+def new_stats() -> dict:
     return {"eventos_processados": 0, "leads_criados": 0, "leads_atualizados": 0, "erros": 0}
 
 
@@ -184,13 +184,19 @@ def _find_lead_ids_for_contact_linked_to_event(contact_id: int, item_id: int) ->
     return [int(lead["ID"]) for lead in leads]
 
 
-def _find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date: str, inscritos_count: int, presentes_count: int) -> int | None:
+def find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date: str, inscritos_count: int, presentes_count: int) -> int | None:
     """Acha (ou cria) o item da SPA nativa "Eventos Sympla" pra esse
     evento, e atualiza os campos agregados (Total de Inscritos/Presentes/
     Faltosos, Última Sincronização, Nome do Evento). Fail-ABERTO: se
     qualquer chamada falhar, loga e retorna None — a sincronização de
     Lead/Contato continua normalmente, só sem o vínculo com a SPA nesta
     rodada (tentará de novo na próxima).
+
+    Sem underscore de propósito: também é chamado por
+    interface/routes_eventos.py::reprocessar_inscrito (o botão precisa do
+    item_id atual pra vincular o Lead ao evento — e de brinde, já que
+    buscou a lista completa de participantes da Sympla, atualiza os
+    contadores agregados do item na mesma chamada).
 
     Nunca mexe em stageId (a coluna Kanban do item) — isso é decisão
     humana/comercial, mesmo espírito da defesa que já existe pra nunca
@@ -570,7 +576,7 @@ def get_event_or_raise(event_id: str) -> dict:
     return event
 
 
-def _preparar_contexto_evento(event_id: str, event_name: str, event_date: str) -> dict:
+def preparar_contexto_evento(event_id: str, event_name: str, event_date: str) -> dict:
     """Tudo que process_participant precisa resolver UMA vez por evento
     (não por inscrito): códigos de campo, mapeamentos extras, o item da
     lista "Filtrar Evento" (garante via chamada ao Bitrix, ensure_enum_value)
@@ -655,7 +661,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
     # Item da SPA nativa "Eventos Sympla" do Bitrix — fail-aberto (None se
     # indisponível, process_participant simplesmente não vincula nada à
     # SPA nesta rodada).
-    item_id = _find_or_create_evento_item(event_id, event_name, event_date, len(participants), presentes_count)
+    item_id = find_or_create_evento_item(event_id, event_name, event_date, len(participants), presentes_count)
 
     if force:
         participants_to_process = participants
@@ -676,7 +682,7 @@ def process_event(event: dict, stats: dict, force: bool = False) -> bool:
 
     log.info("%d inscrito(s) a processar em %s (id interno %s) de %d no total.", len(participants_to_process), event_name, event_id, len(participants))
 
-    ctx = _preparar_contexto_evento(event_id, event_name, event_date)
+    ctx = preparar_contexto_evento(event_id, event_name, event_date)
 
     resultados = []
     for participant in participants_to_process:
@@ -737,7 +743,7 @@ def sync_all_upcoming_events(test_event_ids: set[str] | None = None) -> dict:
         acquire_lock("global", "cron")
     except SyncLockHeld as exc:
         log.warning("Execução agendada pulada, trava global em uso: %s", exc)
-        return _new_stats()
+        return new_stats()
 
     try:
         iniciado_em = datetime.now(timezone.utc)
@@ -750,7 +756,7 @@ def sync_all_upcoming_events(test_event_ids: set[str] | None = None) -> dict:
         else:
             events = _filter_eventos_ativos(events)
 
-        stats = _new_stats()
+        stats = new_stats()
         status = "ok"
         try:
             for event in events:
@@ -782,7 +788,7 @@ def sync_one_event(event_id: str, force: bool = False) -> dict:
     iniciado_em = datetime.now(timezone.utc)
     event = get_event_or_raise(event_id)
 
-    stats = _new_stats()
+    stats = new_stats()
     stats["eventos_processados"] = 1
     status = "ok"
     try:

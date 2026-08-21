@@ -16,7 +16,7 @@
     <tbody>
         {% for e in eventos %}
         <tr>
-            <td>{{ e.nome }}<br><code>{{ e.id }}</code></td>
+            <td><a href="{{ url_for('eventos.inscritos', event_id=e.id) }}">{{ e.nome }}</a><br><code>{{ e.id }}</code></td>
             <td>{{ e.data }}</td>
             <td>{{ e.inscritos }}</td>
             <td>{{ e.presentes }}</td>
@@ -32,6 +32,7 @@
             </td>
             <td class="actions-cell">
                 <div class="actions-row">
+                    <a href="{{ url_for('eventos.inscritos', event_id=e.id) }}"><button type="button" class="secondary" title="Lista todos os inscritos deste evento: quem já era cliente, por qual sinal bateu e o link pro card no Bitrix.">Ver inscritos</button></a>
                     <form method="post" action="{{ url_for('eventos.sincronizar', event_id=e.id) }}">
                         <button type="submit" {{ "disabled" if e.removido else "" }} title="Processa só os inscritos novos desde a última sincronização.">Sincronizar agora</button>
                     </form>

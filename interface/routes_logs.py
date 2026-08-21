@@ -1,8 +1,8 @@
 """
 Aba Logs: histórico paginado de execucoes_log_itens, com filtro por
-entidade (Todas/Evento/Participante — hoje só há entradas 'evento', já
-que o log fino foi escopado a esse nível nesta fase; granularidade por
-participante fica pra uma iteração futura se o time sentir falta).
+entidade (Todas/Evento/Participante — desde a aba "Inscritos" (migração
+0006), toda sincronização também grava uma linha PARTICIPANT_CREATED/
+UPDATED/SKIPPED por inscrito, não só EVENT_SYNCED por evento).
 """
 
 import logging
