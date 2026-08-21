@@ -230,8 +230,11 @@ td a:hover { text-decoration: underline; }
 
 /* Aba Inscritos: nome de inscrito ocasionalmente vem muito longo da
    Sympla (dado do próprio formulário, não normalizado) — sem limite,
-   engorda a coluna e deixa a linha inteira desproporcional. */
-.inscritos-table td:first-child { max-width: 220px; word-break: break-word; }
+   engorda a coluna e deixa a linha inteira desproporcional. Palavras do
+   nome já quebram sozinhas nos espaços dentro do max-width; o id em
+   <code> é protegido de quebrar no meio dos dígitos (nowrap). */
+.inscritos-table td:first-child { max-width: 220px; }
+.inscritos-table td:first-child code { white-space: nowrap; }
 
 code {
     background: var(--color-neutral-bg);
