@@ -18,10 +18,15 @@
             <td>{{ c.email_assessor or "–" }}</td>
             <td>{{ c.origem_canal or "–" }}</td>
             <td>
-                <form method="post" action="{{ url_for('cupons.remover') }}" onsubmit="return confirm('Remover o cupom {{ c.cupom }}?');">
-                    <input type="hidden" name="cupom" value="{{ c.cupom }}">
-                    <button type="submit" class="danger">Excluir</button>
-                </form>
+                <div class="actions-stack">
+                <div class="actions-row">
+                    <a href="{{ url_for('cupons.index', editar=c.cupom) }}"><button type="button" class="secondary">Editar</button></a>
+                    <form method="post" action="{{ url_for('cupons.remover') }}" onsubmit="return confirm('Remover o cupom {{ c.cupom }}?');">
+                        <input type="hidden" name="cupom" value="{{ c.cupom }}">
+                        <button type="submit" class="danger">Excluir</button>
+                    </form>
+                </div>
+                </div>
             </td>
         </tr>
         {% else %}
@@ -31,25 +36,30 @@
 </table>
 </div>
 
+{% if editando %}
+<h3>Editar cupom "{{ editando.cupom }}"</h3>
+{% else %}
 <h3>+ Novo cupom</h3>
+{% endif %}
 <section class="form-card">
 <form method="post" action="{{ url_for('cupons.salvar') }}">
     <label for="cupom">Cupom (mesmo formato que a Sympla manda, ex: "100.00% - NOME")</label>
-    <input type="text" id="cupom" name="cupom" required>
+    <input type="text" id="cupom" name="cupom" value="{{ editando.cupom if editando else '' }}" {{ "readonly" if editando }} required>
 
     <label for="tipo">Tipo</label>
     <select id="tipo" name="tipo" required>
-        <option value="assessor">Assessor</option>
-        <option value="canal">Canal de aquisição</option>
+        <option value="assessor" {{ "selected" if editando and editando.tipo == "assessor" }}>Assessor</option>
+        <option value="canal" {{ "selected" if editando and editando.tipo == "canal" }}>Canal de aquisição</option>
     </select>
 
     <label for="email_assessor">E-mail do assessor no Bitrix (se tipo = Assessor)</label>
-    <input type="email" id="email_assessor" name="email_assessor">
+    <input type="email" id="email_assessor" name="email_assessor" value="{{ (editando.email_assessor or '') if editando else '' }}">
 
     <label for="origem_canal">Texto da Origem (se tipo = Canal, ex: "Trafego Pago")</label>
-    <input type="text" id="origem_canal" name="origem_canal">
+    <input type="text" id="origem_canal" name="origem_canal" value="{{ (editando.origem_canal or '') if editando else '' }}">
 
-    <button type="submit" class="mt-lg">Salvar</button>
+    <button type="submit" class="mt-lg">{{ "Salvar alterações" if editando else "Salvar" }}</button>
+    {% if editando %}<a class="link-arrow" href="{{ url_for('cupons.index') }}">Cancelar edição</a>{% endif %}
 </form>
 </section>
 {% endblock %}

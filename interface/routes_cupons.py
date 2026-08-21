@@ -28,7 +28,15 @@ def index():
         rows = []
         flash(f"Não foi possível ler os cupons do Supabase agora: {exc}", "erro")
     rows = sorted(rows, key=lambda r: r.get("cupom", ""))
-    return render_template("cupons.html", cupons=rows)
+
+    editando = None
+    cupom_editar = request.args.get("editar", "")
+    if cupom_editar:
+        editando = next((r for r in rows if r.get("cupom") == cupom_editar), None)
+        if editando is None:
+            flash(f"Cupom '{cupom_editar}' não encontrado — pode já ter sido removido.", "erro")
+
+    return render_template("cupons.html", cupons=rows, editando=editando)
 
 
 @cupons_bp.route("/salvar", methods=["POST"])
