@@ -228,6 +228,11 @@ tbody tr td[colspan] { color: var(--color-text-muted); text-align: center; paddi
 td a { color: var(--color-primary); font-weight: 600; text-decoration: none; }
 td a:hover { text-decoration: underline; }
 
+/* Aba Inscritos: nome de inscrito ocasionalmente vem muito longo da
+   Sympla (dado do próprio formulário, não normalizado) — sem limite,
+   engorda a coluna e deixa a linha inteira desproporcional. */
+.inscritos-table td:first-child { max-width: 220px; word-break: break-word; }
+
 code {
     background: var(--color-neutral-bg);
     border: 1px solid var(--color-border);
@@ -283,7 +288,13 @@ button:disabled:active { transform: none; }
 
 /* Célula de ações com várias linhas (ex: aba Eventos) — botões menores que
    os de página inteira, agrupados em linhas pra não empilhar sem ordem. */
-.actions-cell { display: flex; flex-direction: column; gap: .35rem; align-items: flex-start; }
+/* Em linhas muito altas (ex: nome de inscrito longo demais, quebrando em
+   várias linhas), o vertical-align:middle da célula nem sempre é
+   respeitado por um filho flex (bug conhecido de interação table-cell +
+   flex em alguns navegadores) — o botão fica "grudado" no topo da linha
+   em vez de centralizado como as outras células. justify-content:center
+   força o centro independente disso. */
+.actions-cell { display: flex; flex-direction: column; justify-content: center; gap: .35rem; align-items: flex-start; }
 .actions-cell form { margin: 0; display: inline; }
 .actions-row { display: flex; gap: .4rem; align-items: center; flex-wrap: wrap; }
 .actions-cell button { padding: .35rem .7rem; font-size: .78rem; box-shadow: none; }
