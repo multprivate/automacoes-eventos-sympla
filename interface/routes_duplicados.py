@@ -9,19 +9,15 @@ import logging
 
 from flask import Blueprint, flash, redirect, render_template, url_for
 
-from common.constants import BITRIX_PORTAL_URL
 from repositories import duplicados_repo
 from services.duplicidade_service import executar_merge, ignorar
 
 from .auth import login_required
+from .bitrix_links import lead_url as _lead_url
 
 log = logging.getLogger("interface.duplicados")
 
 duplicados_bp = Blueprint("duplicados", __name__, url_prefix="/duplicados")
-
-
-def _lead_url(lead_id: int) -> str:
-    return f"{BITRIX_PORTAL_URL}/crm/lead/details/{lead_id}/"
 
 
 @duplicados_bp.route("/")
