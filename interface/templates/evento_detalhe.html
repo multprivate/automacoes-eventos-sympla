@@ -12,9 +12,9 @@
     <article><p>Inscritos</p><h4>{{ resumo.total }}</h4></article>
     <article><p>Já eram clientes</p><h4>{{ resumo.clientes }}</h4></article>
     <article>
-        <p>Taxa de conversão</p>
-        <h4>{{ resumo.taxa_pct }}%</h4>
-        <small>sobre {{ resumo.clientes + resumo.prospects }} verificado(s)</small>
+        <p>Taxa de presença</p>
+        <h4>{{ resumo.taxa_presenca_pct }}%</h4>
+        <small>{{ resumo.presentes }} de {{ resumo.total }} fizeram check-in</small>
     </article>
     <article><p>Não verificados</p><h4>{{ resumo.nao_verificados }}</h4></article>
 </div>
@@ -32,6 +32,11 @@
 <p class="page-subtitle mt-lg">
     <small>{{ funil.perdido }} perdido(s) (Lead Perdido) · {{ funil.fora_do_funil }} vinculado(s) fora do funil novo — não contam nos degraus acima.</small>
 </p>
+{% if funil.total != total_geral %}
+<p class="page-subtitle">
+    <small>⚠ O Bitrix tem {{ funil.total }} Lead(s) vinculado(s) a este evento, mas {{ total_geral }} inscrito(s) atualmente na Sympla — a diferença normalmente vem de Leads duplicados (achado conhecido, ainda não corrigido na origem) ou de inscrições canceladas na Sympla depois de já terem gerado um Lead. Os números do funil acima refletem o Bitrix, não necessariamente 1 Lead por inscrito atual.</small>
+</p>
+{% endif %}
 {% else %}
 <p class="page-subtitle">Sem dados do funil ainda — evento ainda não vinculado à SPA "Eventos Sympla" no Bitrix (sincronize o evento pelo menos uma vez), ou falha ao consultar o Bitrix agora.</p>
 {% endif %}

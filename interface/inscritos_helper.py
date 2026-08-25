@@ -104,22 +104,22 @@ def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str 
 
 
 def resumo_conversao(linhas: list[dict]) -> dict:
-    """{total, clientes, prospects, nao_verificados, taxa_pct}. taxa_pct
-    usa como denominador só os VERIFICADOS (clientes + prospects), não o
-    total de inscritos: contar quem ainda não foi verificado como "não
-    era cliente" subestimaria a taxa, e ela mudaria sozinha conforme o
-    evento vai sincronizando aos poucos. taxa_pct é 0 quando ninguém
-    ainda foi verificado (sem divisão por zero)."""
+    """{total, clientes, prospects, nao_verificados, presentes,
+    taxa_presenca_pct}. taxa_presenca_pct usa como denominador o TOTAL de
+    inscritos (não só os verificados): check-in é um fato da Sympla,
+    independente de o inscrito já ter sido casado com um Contato/Lead no
+    Bitrix. 0 quando não há nenhum inscrito (sem divisão por zero)."""
     total = len(linhas)
     clientes = sum(1 for l in linhas if l["status"] == "cliente")
     prospects = sum(1 for l in linhas if l["status"] == "prospect")
     nao_verificados = total - clientes - prospects
-    verificados = clientes + prospects
-    taxa_pct = round(100 * clientes / verificados) if verificados else 0
+    presentes = sum(1 for l in linhas if l["checkin"])
+    taxa_presenca_pct = round(100 * presentes / total) if total else 0
     return {
         "total": total,
         "clientes": clientes,
         "prospects": prospects,
         "nao_verificados": nao_verificados,
-        "taxa_pct": taxa_pct,
+        "presentes": presentes,
+        "taxa_presenca_pct": taxa_presenca_pct,
     }

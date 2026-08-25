@@ -129,11 +129,11 @@ class TestFilterLinhas:
 
 
 class TestResumoConversao:
-    def test_taxa_considera_so_verificados_no_denominador(self):
+    def test_contagens_basicas(self):
         linhas = [
-            {"status": "cliente"}, {"status": "cliente"},
-            {"status": "prospect"},
-            {"status": "nao_verificado"}, {"status": "nao_verificado"},
+            {"status": "cliente", "checkin": True}, {"status": "cliente", "checkin": False},
+            {"status": "prospect", "checkin": True},
+            {"status": "nao_verificado", "checkin": False}, {"status": "nao_verificado", "checkin": False},
         ]
         resumo = resumo_conversao(linhas)
 
@@ -141,15 +141,20 @@ class TestResumoConversao:
         assert resumo["clientes"] == 2
         assert resumo["prospects"] == 1
         assert resumo["nao_verificados"] == 2
-        assert resumo["taxa_pct"] == 67  # 2 de 3 verificados, arredondado
 
-    def test_ninguem_verificado_ainda_nao_divide_por_zero(self):
-        linhas = [{"status": "nao_verificado"}, {"status": "nao_verificado"}]
+    def test_taxa_presenca_usa_o_total_como_denominador(self):
+        """Check-in é fato da Sympla, independente do inscrito já ter
+        sido verificado (casado com Contato/Lead) no Bitrix ou não."""
+        linhas = [
+            {"status": "cliente", "checkin": True},
+            {"status": "nao_verificado", "checkin": True},
+            {"status": "nao_verificado", "checkin": False},
+        ]
         resumo = resumo_conversao(linhas)
 
-        assert resumo["taxa_pct"] == 0
-        assert resumo["nao_verificados"] == 2
+        assert resumo["presentes"] == 2
+        assert resumo["taxa_presenca_pct"] == 67  # 2 de 3, arredondado
 
-    def test_lista_vazia(self):
+    def test_sem_inscrito_nenhum_nao_divide_por_zero(self):
         resumo = resumo_conversao([])
-        assert resumo == {"total": 0, "clientes": 0, "prospects": 0, "nao_verificados": 0, "taxa_pct": 0}
+        assert resumo == {"total": 0, "clientes": 0, "prospects": 0, "nao_verificados": 0, "presentes": 0, "taxa_presenca_pct": 0}
