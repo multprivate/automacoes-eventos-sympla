@@ -34,7 +34,7 @@ def index():
     if cupom_editar:
         editando = next((r for r in rows if r.get("cupom") == cupom_editar), None)
         if editando is None:
-            flash(f"Cupom '{cupom_editar}' não encontrado — pode já ter sido removido.", "erro")
+            flash(f"Cupom '{cupom_editar}' não encontrado. Pode já ter sido removido.", "erro")
 
     return render_template("cupons.html", cupons=rows, editando=editando)
 
@@ -68,7 +68,7 @@ def salvar():
             coupons_repo.upsert_coupon(cupom, tipo, email_assessor, origem_canal)
     except Exception as exc:
         log.error("Falha ao salvar cupom '%s' (original: '%s'): %s", cupom, cupom_original, exc)
-        flash(f"Falha ao salvar o cupom '{cupom}' — já existe outro cupom com esse texto? Detalhe: {exc}", "erro")
+        flash(f"Falha ao salvar o cupom '{cupom}': já existe outro cupom com esse texto? Detalhe: {exc}", "erro")
         return redirect(url_for("cupons.index"))
 
     coupon_service.load_coupon_maps(force_refresh=True)

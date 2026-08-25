@@ -34,7 +34,7 @@ def login():
     if request.method == "POST":
         senha = request.form.get("senha", "")
         if not ADMIN_PASSWORD:
-            erro = "ADMIN_PASSWORD não configurado no servidor — fala com quem administra o deploy."
+            erro = "ADMIN_PASSWORD não configurado no servidor: fala com quem administra o deploy."
         elif hmac.compare_digest(senha, ADMIN_PASSWORD):
             session["admin_logado"] = True
             destino = request.args.get("next") or url_for("dashboard.index")

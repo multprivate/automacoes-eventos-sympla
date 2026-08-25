@@ -38,12 +38,12 @@
                         <button type="submit" {{ "disabled" if e.removido else "" }} title="Processa só os inscritos novos desde a última sincronização.">Sincronizar agora</button>
                     </form>
                     <form method="post" action="{{ url_for('eventos.forcar', event_id=e.id) }}" onsubmit="return confirm('Forçar atualização de campos em TODOS os inscritos de {{ e.nome }}?');">
-                        <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }} title="Reprocessa TODOS os inscritos, reenviando os campos mesmo que já estejam certos. Se o evento já passou, também preenche 'Presente no evento' (conforme check-in real na Sympla) e move os Leads pra 'Pós Evento' — exceto os já Ganhos/Perdidos.">Forçar campos</button>
+                        <button type="submit" class="secondary" {{ "disabled" if e.removido else "" }} title="Reprocessa TODOS os inscritos, reenviando os campos mesmo que já estejam certos. Se o evento já passou, também preenche 'Presente no evento' (conforme check-in real na Sympla) e move os Leads pra 'Pós Evento', exceto os já Ganhos/Perdidos.">Forçar campos</button>
                     </form>
                 </div>
                 <div class="actions-row">
                     <form method="post" action="{{ url_for('eventos.toggle', event_id=e.id) }}">
-                        <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }} title="{{ 'Tira este evento da sincronização automática (o cron passa a ignorá-lo) — os botões manuais continuam funcionando.' if e.ativo else 'Volta a incluir este evento na sincronização automática.' }}">{{ "Pausar" if e.ativo else "Ativar" }}</button>
+                        <button type="submit" class="contrast" {{ "disabled" if e.removido else "" }} title="{{ 'Tira este evento da sincronização automática (o cron passa a ignorá-lo). Os botões manuais continuam funcionando.' if e.ativo else 'Volta a incluir este evento na sincronização automática.' }}">{{ "Pausar" if e.ativo else "Ativar" }}</button>
                     </form>
                     {% if not e.removido %}
                     <form method="post" action="{{ url_for('eventos.remover', event_id=e.id) }}" onsubmit="return confirm('Remover {{ e.nome }} da sincronização automática?');">

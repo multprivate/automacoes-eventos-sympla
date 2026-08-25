@@ -3,7 +3,7 @@
 {% block content %}
 <p class="eyebrow">Qualidade de dados</p>
 <h2>Verificação de Duplicados</h2>
-<p class="page-subtitle">Pares de Lead com o mesmo telefone achados pela varredura periódica — confira os dois cards antes de decidir</p>
+<p class="page-subtitle">Pares de Lead com o mesmo telefone achados pela varredura periódica. Confira os dois cards antes de decidir.</p>
 
 <div class="table-wrap">
 <table>
@@ -26,7 +26,7 @@
                         <button type="submit" title="Escolhe automaticamente o Lead principal (vínculo com evento &gt; e-mail &gt; mais atividades &gt; mais antigo) e apaga o outro, preservando o histórico como comentário.">Mesclar</button>
                     </form>
                     <form method="post" action="{{ url_for('duplicados.ignorar_rota', candidato_id=c.id) }}">
-                        <button type="submit" class="secondary" title="Marca este par como não-duplicado (ex: mesmo telefone, pessoas diferentes) — não aparece mais nesta lista.">Ignorar</button>
+                        <button type="submit" class="secondary" title="Marca este par como não-duplicado (ex: mesmo telefone, pessoas diferentes): não aparece mais nesta lista.">Ignorar</button>
                     </form>
                 </div>
                 </div>

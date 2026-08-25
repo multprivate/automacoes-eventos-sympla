@@ -30,15 +30,15 @@
     {% endfor %}
 </div>
 <p class="page-subtitle mt-lg">
-    <small>{{ funil.perdido }} perdido(s) (Lead Perdido) · {{ funil.fora_do_funil }} vinculado(s) fora do funil novo — não contam nos degraus acima.</small>
+    <small>{{ funil.perdido }} perdido(s) (Lead Perdido) · {{ funil.fora_do_funil }} vinculado(s) fora do funil novo. Não contam nos degraus acima.</small>
 </p>
 {% if funil.total != total_geral %}
 <p class="page-subtitle">
-    <small>⚠ O Bitrix tem {{ funil.total }} Lead(s) vinculado(s) a este evento, mas {{ total_geral }} inscrito(s) atualmente na Sympla — a diferença normalmente vem de Leads duplicados (achado conhecido, ainda não corrigido na origem) ou de inscrições canceladas na Sympla depois de já terem gerado um Lead. Os números do funil acima refletem o Bitrix, não necessariamente 1 Lead por inscrito atual.</small>
+    <small>⚠ O Bitrix tem {{ funil.total }} Lead(s) vinculado(s) a este evento, mas {{ total_geral }} inscrito(s) atualmente na Sympla: a diferença normalmente vem de Leads duplicados (achado conhecido, ainda não corrigido na origem) ou de inscrições canceladas na Sympla depois de já terem gerado um Lead. Os números do funil acima refletem o Bitrix, não necessariamente 1 Lead por inscrito atual.</small>
 </p>
 {% endif %}
 {% else %}
-<p class="page-subtitle">Sem dados do funil ainda — evento ainda não vinculado à SPA "Eventos Sympla" no Bitrix (sincronize o evento pelo menos uma vez), ou falha ao consultar o Bitrix agora.</p>
+<p class="page-subtitle">Sem dados do funil ainda: evento ainda não vinculado à SPA "Eventos Sympla" no Bitrix (sincronize o evento pelo menos uma vez), ou falha ao consultar o Bitrix agora.</p>
 {% endif %}
 
 <h3>Inscritos</h3>
@@ -106,7 +106,7 @@
                 {% if l.lead_url %}<a href="{{ l.lead_url }}" target="_blank" rel="noopener">Lead #{{ l.lead_id }}</a><br>{% endif %}
                 {% if l.contact_url %}<a href="{{ l.contact_url }}" target="_blank" rel="noopener">Contato #{{ l.contact_id }}</a>{% endif %}
                 {% if l.tem_duplicado %}
-                <br><span class="badge badge-warning" title="Contatos {{ l.contact_ids_duplicados }} bateram com este inscrito (duplicata pré-existente no Bitrix, não criada pela automação). O de menor ID (#{{ l.contact_id }}) foi o usado. Mesclar Contatos é uma tarefa manual — este painel só sinaliza.">{{ l.contact_ids_duplicados|length }} contatos duplicados</span>
+                <br><span class="badge badge-warning" title="Contatos {{ l.contact_ids_duplicados }} bateram com este inscrito (duplicata pré-existente no Bitrix, não criada pela automação). O de menor ID (#{{ l.contact_id }}) foi o usado. Mesclar Contatos é uma tarefa manual. Este painel só sinaliza.">{{ l.contact_ids_duplicados|length }} contatos duplicados</span>
                 {% endif %}
             </td>
             <td>

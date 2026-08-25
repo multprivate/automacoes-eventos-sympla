@@ -61,7 +61,7 @@ def _run_sync(event_id: str, force: bool) -> None:
     try:
         result = sync_one_event(event_id, force=force)
         if result["erros"]:
-            flash(f"Sincronização de {event_id} terminou com {result['erros']} erro(s) — veja a aba Logs.", "erro")
+            flash(f"Sincronização de {event_id} terminou com {result['erros']} erro(s). Veja a aba Logs.", "erro")
         else:
             flash(f"Evento {event_id} sincronizado: {result['leads_criados']} lead(s) criado(s), {result['leads_atualizados']} atualizado(s).", "ok")
     except Exception as exc:
@@ -145,7 +145,7 @@ def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
         resultados = processed_repo.get_resultados(event_id)
     except Exception as exc:
         log.warning("Falha ao ler participantes_processados de %s: %s", event_id, exc)
-        flash("Não foi possível ler o resultado da sincronização — todo mundo aparece como 'não verificado'.", "erro")
+        flash("Não foi possível ler o resultado da sincronização: todo mundo aparece como 'não verificado'.", "erro")
         resultados = {}
 
     linhas = build_inscritos_view(participants, resultados)
@@ -317,7 +317,7 @@ def reprocessar_inscrito(event_id, participant_id):
         presentes_count = sum(1 for p in participants if (p.get("checkin") or {}).get("check_in_date"))
         item_id = find_or_create_evento_item(event_id, event_name, event_date, len(participants), presentes_count)
         if item_id is None:
-            flash("SPA 'Eventos Sympla' indisponível no Bitrix agora — reprocessar poderia criar um Lead duplicado pra este cliente. Tente de novo em instantes.", "erro")
+            flash("SPA 'Eventos Sympla' indisponível no Bitrix agora: reprocessar poderia criar um Lead duplicado pra este cliente. Tente de novo em instantes.", "erro")
             return redirect(redirect_url)
 
         ctx = preparar_contexto_evento(event_id, event_name, event_date)
@@ -329,18 +329,18 @@ def reprocessar_inscrito(event_id, participant_id):
         )
 
         if resultado is None:
-            flash(f"Falha ao reprocessar o inscrito {participant_id} — veja a aba Logs.", "erro")
+            flash(f"Falha ao reprocessar o inscrito {participant_id}. Veja a aba Logs.", "erro")
             return redirect(redirect_url)
 
         try:
             processed_repo.mark_processed_batch(event_id, [resultado])
         except Exception as exc:
             log.warning("Falha ao gravar resultado do reprocessamento de %s/%s: %s", event_id, participant_id, exc)
-            flash("Inscrito reprocessado no Bitrix, mas falhou ao salvar o resultado — tente reprocessar de novo.", "erro")
+            flash("Inscrito reprocessado no Bitrix, mas falhou ao salvar o resultado. Tente reprocessar de novo.", "erro")
             return redirect(redirect_url)
 
         rotulo_cliente = "cliente" if resultado["is_cliente"] else "prospect"
-        flash(f"Inscrito {participant_id} reprocessado ({rotulo_cliente}, match: {resultado['match_method'] or '—'}).", "ok")
+        flash(f"Inscrito {participant_id} reprocessado ({rotulo_cliente}, match: {resultado['match_method'] or '–'}).", "ok")
         return redirect(redirect_url)
     finally:
         release_lock(event_id)

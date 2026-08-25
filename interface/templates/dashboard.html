@@ -16,7 +16,7 @@
         <h3>{{ ultima_execucao.finalizado_em | brt }}</h3>
         <span class="badge {{ 'badge-ok' if ultima_execucao.status == 'ok' else 'badge-error' }}">{{ ultima_execucao.status }}</span>
         {% else %}
-        <h3>—</h3>
+        <h3>–</h3>
         {% endif %}
     </article>
 </div>
