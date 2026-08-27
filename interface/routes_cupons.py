@@ -17,6 +17,15 @@ log = logging.getLogger("interface.cupons")
 
 cupons_bp = Blueprint("cupons", __name__, url_prefix="/cupons")
 
+# Prefixo fixo no formulário (criar E editar) — o usuário só digita o
+# nome, pra não errar mais o formato (ex: "100%" em vez de "100.00%"),
+# que quebra o match exato contra o que a Sympla manda
+# (domain/coupons.py::resolve_assessor_and_origem). Cupons antigos que
+# não seguem esse padrão (ex: "100% - JOAO") continuam funcionando sem
+# mexer — só são reescritos pro padrão novo se alguém abrir "Editar"
+# neles e salvar (a tela avisa antes, ver index()).
+CUPOM_PREFIXO = "100.00% - "
+
 
 @cupons_bp.route("/")
 @login_required
@@ -30,26 +39,37 @@ def index():
     rows = sorted(rows, key=lambda r: r.get("cupom", ""))
 
     editando = None
+    editando_nome = ""
+    editando_prefixo_ok = True
     cupom_editar = request.args.get("editar", "")
     if cupom_editar:
         editando = next((r for r in rows if r.get("cupom") == cupom_editar), None)
         if editando is None:
             flash(f"Cupom '{cupom_editar}' não encontrado. Pode já ter sido removido.", "erro")
+        elif editando["cupom"].startswith(CUPOM_PREFIXO):
+            editando_nome = editando["cupom"][len(CUPOM_PREFIXO):]
+        else:
+            editando_nome = editando["cupom"]
+            editando_prefixo_ok = False
 
-    return render_template("cupons.html", cupons=rows, editando=editando)
+    return render_template(
+        "cupons.html", cupons=rows, editando=editando, cupom_prefixo=CUPOM_PREFIXO,
+        editando_nome=editando_nome, editando_prefixo_ok=editando_prefixo_ok,
+    )
 
 
 @cupons_bp.route("/salvar", methods=["POST"])
 @login_required
 def salvar():
-    cupom = request.form.get("cupom", "").strip().upper()
+    cupom_nome = request.form.get("cupom_nome", "").strip().upper()
+    cupom = f"{CUPOM_PREFIXO}{cupom_nome}" if cupom_nome else ""
     cupom_original = request.form.get("cupom_original", "").strip()
     tipo = request.form.get("tipo", "")
     email_assessor = request.form.get("email_assessor", "").strip() or None
     origem_canal = request.form.get("origem_canal", "").strip() or None
 
-    if not cupom or tipo not in ("assessor", "canal"):
-        flash("Preenche cupom e tipo pra salvar.", "erro")
+    if not cupom_nome or tipo not in ("assessor", "canal"):
+        flash("Preenche o nome do cupom e o tipo pra salvar.", "erro")
         return redirect(url_for("cupons.index"))
     if tipo == "assessor" and not email_assessor:
         flash("Tipo 'assessor' precisa do e-mail do assessor.", "erro")

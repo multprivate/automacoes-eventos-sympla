@@ -354,6 +354,28 @@ table input[type=text] { max-width: none; }
 }
 .form-card label:first-of-type { margin-top: 0; }
 
+/* Grupo prefixo fixo + campo de texto (ex: cupom "100.00% - NOME") — o
+   prefixo nunca é editável, só existe visualmente pra ninguém digitar
+   errado. Os dois lados encostados parecem um campo só. */
+.cupom-input-group { display: flex; max-width: 420px; }
+.cupom-prefixo {
+    display: flex;
+    align-items: center;
+    padding: .65rem .85rem;
+    background: var(--color-neutral-bg);
+    border: 1px solid var(--color-border-strong);
+    border-right: none;
+    border-radius: var(--radius-sm) 0 0 var(--radius-sm);
+    color: var(--color-text-muted);
+    font-size: .92rem;
+    white-space: nowrap;
+}
+.cupom-input-group input[type=text] {
+    max-width: none;
+    flex: 1;
+    border-radius: 0 var(--radius-sm) var(--radius-sm) 0;
+}
+
 /* Flash messages -----------------------------------------------------------*/
 .flash-stack { display: grid; gap: .6rem; margin-bottom: 1.5rem; }
 .flash {

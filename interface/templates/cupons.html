@@ -44,9 +44,16 @@
 <section class="form-card">
 <form method="post" action="{{ url_for('cupons.salvar') }}">
     {% if editando %}<input type="hidden" name="cupom_original" value="{{ editando.cupom }}">{% endif %}
-    <label for="cupom">Cupom (mesmo formato que a Sympla manda, ex: "100.00% - NOME")</label>
-    <input type="text" id="cupom" name="cupom" value="{{ editando.cupom if editando else '' }}" required>
-    {% if editando %}<small>Mudar o texto aqui renomeia o cupom (não cria um segundo).</small>{% endif %}
+    <label for="cupom_nome">Cupom (o prefixo já vem preenchido — digite só o nome)</label>
+    <div class="cupom-input-group">
+        <span class="cupom-prefixo">{{ cupom_prefixo }}</span>
+        <input type="text" id="cupom_nome" name="cupom_nome" value="{{ editando_nome }}" placeholder="NOME" required>
+    </div>
+    {% if editando and not editando_prefixo_ok %}
+    <small>⚠ Esse cupom não segue o padrão "{{ cupom_prefixo }}NOME" (valor atual: "{{ editando.cupom }}"). Salvar aqui vai reescrevê-lo como "{{ cupom_prefixo }}{{ editando_nome }}" (ou o que você digitar no lugar). Confira com cuidado antes de salvar, pra não quebrar o match com a Sympla.</small>
+    {% elif editando %}
+    <small>Mudar o nome aqui renomeia o cupom (não cria um segundo).</small>
+    {% endif %}
 
     <label for="tipo">Tipo</label>
     <select id="tipo" name="tipo" required>
