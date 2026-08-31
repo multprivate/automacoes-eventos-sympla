@@ -1,5 +1,5 @@
 {
   "deploy": {
-    "startCommand": "gunicorn interface_app:app --bind 0.0.0.0:$PORT"
+    "startCommand": "gunicorn interface_app:app --bind 0.0.0.0:$PORT --timeout 300 --workers 2"
   }
 }
