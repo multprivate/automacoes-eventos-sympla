@@ -64,6 +64,59 @@ class TestFindMatchingLeadIdsWrapper:
         assert get_lead_calls == [3]
 
 
+class TestContactFullName:
+    def test_combina_name_e_last_name(self):
+        assert lead_sync_service._contact_full_name({"NAME": "Francisco", "LAST_NAME": "Leocadio Cavalcante Barroso"}) == "Francisco Leocadio Cavalcante Barroso"
+
+    def test_tolera_campos_ausentes(self):
+        assert lead_sync_service._contact_full_name({}) == ""
+        assert lead_sync_service._contact_full_name({"NAME": "Francisco", "LAST_NAME": None}) == "Francisco"
+
+    def test_nome_completo_so_no_name_ainda_funciona(self):
+        """Achado real: alguns Contatos têm o nome completo inteiro só no
+        NAME, com LAST_NAME sujo/duplicado — concatenar não quebra a
+        comparação por palavra inteira depois (names_are_compatible tolera
+        a duplicação)."""
+        contact = {"NAME": "CLAUDIO ROBERTO GOMES NOGUEIRA BORGES", "LAST_NAME": "ROBERTO GOMES NOGUEIRA BORGES (169806) THAÍS"}
+        full = lead_sync_service._contact_full_name(contact)
+        assert "CLAUDIO ROBERTO GOMES NOGUEIRA BORGES" in full
+
+
+class TestFindMatchingContactIdsWrapper:
+    def test_email_bate_mas_nome_diverge_usa_get_contact_pra_confirmar_e_rejeita(self, monkeypatch):
+        """Reproduz o caso real de produção (casal Thiago/Manuela, mesmo
+        e-mail de conta pra comprar 2 ingressos): a busca por e-mail acha o
+        Contato da Manuela (cliente de verdade), mas o nome dele (resolvido
+        via get_contact, um crm.contact.get de verdade — NAME + LAST_NAME
+        concatenados) não bate com o inscrito Thiago -> o wrapper rejeita,
+        Thiago não vira Contato nenhum."""
+        get_contact_calls = []
+
+        def fake_get_contact(contact_id):
+            get_contact_calls.append(contact_id)
+            return {"ID": contact_id, "NAME": "Manuela de Paiva", "LAST_NAME": "Reginaldo"}
+
+        monkeypatch.setattr(lead_sync_service, "get_contact", fake_get_contact)
+        monkeypatch.setattr(lead_sync_service, "find_contact_ids_by_phone", lambda phone: [])
+        monkeypatch.setattr(lead_sync_service, "find_contact_ids_by_email", lambda email: [44080])
+
+        ids, method = lead_sync_service.find_matching_contact_ids("", "", "manuelapaiva@yahoo.com.br", "Thiago Zambianco Cuim")
+
+        assert ids == []
+        assert method is None
+        assert get_contact_calls == [44080]
+
+    def test_email_bate_e_nome_confere_aceita(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "get_contact", lambda cid: {"ID": cid, "NAME": "Manuela de Paiva", "LAST_NAME": "Reginaldo"})
+        monkeypatch.setattr(lead_sync_service, "find_contact_ids_by_phone", lambda phone: [])
+        monkeypatch.setattr(lead_sync_service, "find_contact_ids_by_email", lambda email: [44080])
+
+        ids, method = lead_sync_service.find_matching_contact_ids("", "", "manuelapaiva@yahoo.com.br", "Manuela de Paiva Reginaldo")
+
+        assert ids == [44080]
+        assert method == "email"
+
+
 PARTICIPANT = {"id": "999"}
 STATS = lambda: {"eventos_processados": 0, "leads_criados": 0, "leads_atualizados": 0, "erros": 0}
 
@@ -204,7 +257,7 @@ class TestProcessClienteParticipant:
 
 class TestProcessParticipantDispatch:
     def test_contato_encontrado_vai_pro_branch_cliente(self, monkeypatch):
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([42], "telefone"))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([42], "telefone"))
         monkeypatch.setattr(
             lead_sync_service, "_process_cliente_participant",
             lambda *a, **kw: {"contact_id": 42, "lead_id": 7, "contact_ids_duplicados": None, "criou_lead": True, "atualizou": False},
@@ -226,7 +279,7 @@ class TestProcessParticipantDispatch:
         assert result["bitrix_lead_id"] == 7
 
     def test_sem_contato_cai_na_cascata_de_lead(self, monkeypatch):
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda *a, **kw: ([], None))
 
         stats = STATS()
@@ -247,7 +300,7 @@ class TestProcessParticipantLogPorParticipante:
 
     def test_cliente_lead_criado_loga_participant_created(self, monkeypatch):
         log_calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([42], "email"))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([42], "email"))
         monkeypatch.setattr(
             lead_sync_service, "_process_cliente_participant",
             lambda *a, **kw: {"contact_id": 42, "lead_id": 7, "contact_ids_duplicados": None, "criou_lead": True, "atualizou": False},
@@ -275,7 +328,7 @@ class TestProcessParticipantLogPorParticipante:
         não tem nada a fazer, PARTICIPANT_SKIPPED com status ok (não é erro,
         é 'nada mudou')."""
         log_calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWINSCRITO"})
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: {})
@@ -295,7 +348,7 @@ class TestProcessParticipantLogPorParticipante:
     def test_falha_ao_buscar_contato_loga_participant_skipped_error_e_retorna_none(self, monkeypatch):
         log_calls = []
 
-        def _raise(cpf, phone, email):
+        def _raise(cpf, phone, email, name):
             raise RuntimeError("bitrix indisponível")
 
         monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", _raise)
@@ -342,7 +395,7 @@ class TestProcessParticipantLeadFechado:
 
     def test_so_lead_fechado_cria_lead_novo_sem_tocar_nele(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([54830], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": lead_id, "STATUS_ID": "JUNK"})
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: calls.append(("create_lead", kw)))
@@ -361,7 +414,7 @@ class TestProcessParticipantLeadFechado:
     def test_lead_aberto_e_fechado_juntos_so_atualiza_o_aberto(self, monkeypatch):
         leads = {1: {"ID": 1, "STATUS_ID": "NEWLEAD"}, 2: {"ID": 2, "STATUS_ID": "CONVERTED"}}
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1, 2], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: leads[lead_id])
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo — já tem um aberto")))
@@ -381,7 +434,7 @@ class TestProcessParticipantLeadFechado:
         de NEWLEAD/NEWFUP (mas NÃO fechado) continua só ganhando os campos
         de evento, sem promoção de estágio, exatamente como antes."""
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "UC_Z0M384"})
         monkeypatch.setattr(lead_sync_service, "create_lead_from_participant", lambda *a, **kw: (_ for _ in ()).throw(AssertionError("não deveria criar Lead novo")))
@@ -402,7 +455,7 @@ class TestProcessParticipantLeadFechado:
 class TestProcessParticipantPreencheCpf:
     def test_lead_criado_ganha_cpf_do_inscrito(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "resolve_assessor_and_origem", lambda cupom: (None, "Inscrito Desconhecido"))
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or "123")
@@ -418,7 +471,7 @@ class TestProcessParticipantPreencheCpf:
 
     def test_lead_matched_sem_cpf_e_preenchido(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWLEAD"})
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})
@@ -434,7 +487,7 @@ class TestProcessParticipantPreencheCpf:
 
     def test_lead_matched_com_cpf_ja_preenchido_nao_sobrescreve(self, monkeypatch):
         calls = []
-        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email: ([], None))
+        monkeypatch.setattr(lead_sync_service, "find_matching_contact_ids", lambda cpf, phone, email, name: ([], None))
         monkeypatch.setattr(lead_sync_service, "find_matching_lead_ids", lambda cpf, phone, email, name: ([1], "telefone"))
         monkeypatch.setattr(lead_sync_service, "get_lead", lambda lead_id: {"ID": 1, "STATUS_ID": "NEWLEAD", "UF_CPF": "11122233344"})
         monkeypatch.setattr(lead_sync_service, "bitrix_call", lambda method, payload: calls.append((method, payload)) or {})

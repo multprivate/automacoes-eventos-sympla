@@ -27,6 +27,10 @@ def get_lead(lead_id) -> dict:
     return bitrix_call("crm.lead.get", {"id": lead_id})
 
 
+def get_contact(contact_id) -> dict:
+    return bitrix_call("crm.contact.get", {"id": contact_id})
+
+
 def bitrix_list_all(method: str, payload: dict) -> list:
     """Como bitrix_call, mas pagina automaticamente usando o campo "next"
     da resposta até esgotar os resultados (crm.*.list limita a 50 por
