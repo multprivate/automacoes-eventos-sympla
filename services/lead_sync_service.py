@@ -41,6 +41,7 @@ from common import (
     format_phone_br,
     extract_phone,
     get_all_events,
+    get_contact,
     get_lead,
     get_sympla_all_orders,
     get_sympla_all_participants,
@@ -145,16 +146,29 @@ def find_matching_lead_ids(cpf: str, phone_key: str, email: str, full_name: str)
     )
 
 
-def find_matching_contact_ids(cpf: str, phone_key: str, email: str) -> tuple[list[int], str | None]:
+def _contact_full_name(contact: dict) -> str:
+    """Contato no Bitrix real nem sempre segue "NAME=primeiro nome,
+    LAST_NAME=sobrenome" à risca (achado contra dado real: um Contato
+    tinha o nome completo inteiro só no NAME, outro tinha NAME+LAST_NAME
+    corretamente separados) — concatenar os dois e comparar por palavra
+    inteira (names_are_compatible) tolera essa inconsistência sem causar
+    falso-negativo."""
+    return f"{contact.get('NAME') or ''} {contact.get('LAST_NAME') or ''}".strip()
+
+
+def find_matching_contact_ids(cpf: str, phone_key: str, email: str, full_name: str) -> tuple[list[int], str | None]:
     """Fina casca sobre domain.matching para Contatos (clientes) — CPF,
-    telefone e e-mail, sem fallback por nome (ver domain/matching.py)."""
+    telefone e e-mail, sem passo de busca por NOME (ver domain/matching.py)
+    — mas telefone/e-mail SÃO confirmados por nome antes de aceitar."""
     return _find_matching_contact_ids(
         cpf,
         phone_key,
         email,
+        full_name,
         lookup_by_cpf=lambda c: find_contact_ids_by_cpf(c, config_service.get_field_cpf_contact()),
         lookup_by_phone=find_contact_ids_by_phone,
         lookup_by_email=find_contact_ids_by_email,
+        get_contact_name=lambda contact_id: _contact_full_name(get_contact(contact_id) or {}),
     )
 
 
@@ -474,7 +488,7 @@ def process_participant(participant: dict, event_name: str, event_date: str, eve
     }
 
     try:
-        contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
+        contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email, full_name)
     except Exception as exc:
         log.error("Falha ao buscar contato (cliente) pro inscrito %s: %s", participant.get("id"), exc)
         stats["erros"] += 1
