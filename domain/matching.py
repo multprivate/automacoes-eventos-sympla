@@ -44,6 +44,17 @@ def names_are_compatible(name_a: str, name_b: str) -> bool:
     return menor.issubset(maior)
 
 
+def _confirmar_candidatos(candidate_ids: list[int], full_name: str, get_name: NameLookupFn) -> list[int]:
+    """Filtra candidatos de telefone/e-mail mantendo só os compatíveis por
+    nome (`names_are_compatible`) — usado tanto na cascata de Lead quanto
+    na de Contato, mesma regra: sem candidatos ou sem nome no inscrito,
+    retorna como veio (não há sinal pra rejeitar); com nome, só passa
+    quem for a mesma pessoa."""
+    if not candidate_ids or not full_name:
+        return candidate_ids
+    return [cid for cid in candidate_ids if names_are_compatible(full_name, get_name(cid))]
+
+
 def find_matching_lead_ids(
     cpf: str,
     phone_key: str,
@@ -76,18 +87,13 @@ def find_matching_lead_ids(
         if lead_ids:
             return lead_ids, "cpf"
 
-    def _confirmados(candidate_ids: list[int]) -> list[int]:
-        if not candidate_ids or not full_name:
-            return candidate_ids
-        return [cid for cid in candidate_ids if names_are_compatible(full_name, get_lead_name(cid))]
-
     if phone_key:
-        confirmed_ids = _confirmados(lookup_by_phone(phone_key))
+        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_lead_name)
         if confirmed_ids:
             return confirmed_ids, "telefone"
 
     if email:
-        confirmed_ids = _confirmados(lookup_by_email(email))
+        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_lead_name)
         if confirmed_ids:
             return confirmed_ids, "email"
 
@@ -99,31 +105,46 @@ def find_matching_contact_ids(
     cpf: str,
     phone_key: str,
     email: str,
+    full_name: str,
     lookup_by_cpf: LookupFn,
     lookup_by_phone: LookupFn,
     lookup_by_email: LookupFn,
+    get_contact_name: NameLookupFn,
 ) -> tuple[list[int], str | None]:
-    """Cascata CPF -> telefone -> e-mail, SEM fallback por nome (diferente
-    da cascata de Lead). Um Contato representa um cliente de verdade — um
-    match por nome (sujeito a falso positivo, ex: dois "João Silva"
-    diferentes) vincularia a inscrição de um estranho ao histórico de um
-    cliente real, um erro bem mais caro do que o mesmo tipo de engano
-    aconteceria com um Lead desconhecido. CPF não tem esse risco (é único
-    por pessoa), por isso pode ser o primeiro critério com segurança."""
+    """Cascata CPF -> telefone -> e-mail, sem fallback por NOME como
+    critério de busca (diferente da cascata de Lead, que tenta um passo
+    de busca por nome quando mais nada bate) — um Contato representa um
+    cliente de verdade, e um match cuja ÚNICA base é o nome (sujeito a
+    falso positivo, ex: dois "João Silva" diferentes) vincularia a
+    inscrição de um estranho ao histórico de um cliente real, um erro bem
+    mais caro do que o mesmo engano com um Lead desconhecido.
+
+    Mas telefone/e-mail SÃO confirmados por nome antes de aceitar
+    (`_confirmar_candidatos`, mesma defesa da cascata de Lead) — achado
+    real de produção: duas pessoas diferentes de uma mesma família (ex:
+    um casal) usando o mesmo e-mail pra comprar dois ingressos fazia a
+    inscrição da SEGUNDA pessoa bater no Contato da PRIMEIRA (cliente de
+    verdade), colapsando as duas inscrições num Lead só. Se o nome não
+    confere, a pessoa não é tratada como Contato — cai pra cascata de
+    Lead comum, sem CONTACT_ID.
+
+    CPF não passa por essa confirmação: é único por pessoa por definição,
+    por isso pode ser o primeiro critério com segurança, exatamente como
+    na cascata de Lead."""
     if cpf:
         contact_ids = lookup_by_cpf(cpf)
         if contact_ids:
             return contact_ids, "cpf"
 
     if phone_key:
-        contact_ids = lookup_by_phone(phone_key)
-        if contact_ids:
-            return contact_ids, "telefone"
+        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_contact_name)
+        if confirmed_ids:
+            return confirmed_ids, "telefone"
 
     if email:
-        contact_ids = lookup_by_email(email)
-        if contact_ids:
-            return contact_ids, "email"
+        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_contact_name)
+        if confirmed_ids:
+            return confirmed_ids, "email"
 
     return [], None
 

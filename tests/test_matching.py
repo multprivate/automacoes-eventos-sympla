@@ -236,7 +236,10 @@ def _contact_lookups(cpf_result=None, phone_result=None, email_result=None):
 
 def test_contato_acha_por_cpf_e_nao_tenta_mais_nada():
     calls, by_cpf, by_phone, by_email = _contact_lookups(cpf_result=[99])
-    ids, method = find_matching_contact_ids("05707711376", "+5585999998888", "a@b.com", by_cpf, by_phone, by_email)
+    ids, method = find_matching_contact_ids(
+        "05707711376", "+5585999998888", "a@b.com", "Fulano", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Nome bem diferente de Fulano",
+    )
     assert ids == [99]
     assert method == "cpf"
     assert calls == {"cpf": 1, "phone": 0, "email": 0}
@@ -244,7 +247,10 @@ def test_contato_acha_por_cpf_e_nao_tenta_mais_nada():
 
 def test_contato_sem_cpf_cai_pro_telefone():
     calls, by_cpf, by_phone, by_email = _contact_lookups(phone_result=[10])
-    ids, method = find_matching_contact_ids("", "+5585999998888", "a@b.com", by_cpf, by_phone, by_email)
+    ids, method = find_matching_contact_ids(
+        "", "+5585999998888", "a@b.com", "Fulano", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Fulano",
+    )
     assert ids == [10]
     assert method == "telefone"
     assert calls == {"cpf": 0, "phone": 1, "email": 0}
@@ -252,7 +258,10 @@ def test_contato_sem_cpf_cai_pro_telefone():
 
 def test_contato_acha_por_telefone_e_nao_tenta_email():
     calls, by_cpf, by_phone, by_email = _contact_lookups(phone_result=[10])
-    ids, method = find_matching_contact_ids("", "+5585999998888", "a@b.com", by_cpf, by_phone, by_email)
+    ids, method = find_matching_contact_ids(
+        "", "+5585999998888", "a@b.com", "Fulano", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Fulano",
+    )
     assert ids == [10]
     assert method == "telefone"
     assert calls == {"cpf": 0, "phone": 1, "email": 0}
@@ -260,20 +269,65 @@ def test_contato_acha_por_telefone_e_nao_tenta_email():
 
 def test_contato_sem_telefone_cai_pro_email():
     calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[20])
-    ids, method = find_matching_contact_ids("", "", "a@b.com", by_cpf, by_phone, by_email)
+    ids, method = find_matching_contact_ids(
+        "", "", "a@b.com", "Fulano", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Fulano",
+    )
     assert ids == [20]
     assert method == "email"
     assert calls == {"cpf": 0, "phone": 0, "email": 1}
 
 
 def test_contato_sem_match_nao_tenta_nome():
-    """Diferente da cascata de Lead: Contato não tem fallback por nome —
-    a função nem recebe um lookup_by_name pra tentar."""
+    """Diferente da cascata de Lead: Contato não tem um PASSO de busca por
+    nome (não existe lookup_by_name) — mas telefone/e-mail ainda são
+    confirmados por nome antes de aceitar (ver testes abaixo)."""
     calls, by_cpf, by_phone, by_email = _contact_lookups()
-    ids, method = find_matching_contact_ids("05707711376", "+5585999998888", "a@b.com", by_cpf, by_phone, by_email)
+    ids, method = find_matching_contact_ids(
+        "05707711376", "+5585999998888", "a@b.com", "Fulano", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Fulano",
+    )
     assert ids == []
     assert method is None
     assert calls == {"cpf": 1, "phone": 1, "email": 1}
+
+
+def test_contato_telefone_bate_mas_nome_diferente_rejeita_e_nao_vira_contato():
+    """Caso real de produção: Thiago e Manuela (casal) usaram o mesmo
+    e-mail pra comprar 2 ingressos. Manuela é cliente de verdade (bate por
+    CPF no Contato dela); Thiago não tem CPF nem telefone batendo, só o
+    e-mail — que bate no Contato da Manuela. Sem a confirmação por nome,
+    Thiago virava "cliente" da Manuela e colapsava no mesmo Lead do
+    evento. Com a defesa: rejeita, não vira Contato nenhum (cai pra
+    cascata de Lead comum, fora desta função)."""
+    calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[44080])
+    ids, method = find_matching_contact_ids(
+        "", "", "manuelapaiva@yahoo.com.br", "Thiago Zambianco Cuim", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Manuela de Paiva Reginaldo",
+    )
+    assert ids == []
+    assert method is None
+
+
+def test_contato_email_bate_com_dois_candidatos_so_um_com_nome_confere():
+    calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[44080, 44081])
+    names = {44080: "Manuela de Paiva Reginaldo", 44081: "Thiago Zambianco Cuim"}
+    ids, method = find_matching_contact_ids(
+        "", "", "manuelapaiva@yahoo.com.br", "Thiago Zambianco Cuim", by_cpf, by_phone, by_email,
+        get_contact_name=lambda cid: names[cid],
+    )
+    assert ids == [44081]
+    assert method == "email"
+
+
+def test_contato_telefone_bate_mas_sem_nome_no_inscrito_aceita_sem_confirmar():
+    calls, by_cpf, by_phone, by_email = _contact_lookups(phone_result=[10])
+    ids, method = find_matching_contact_ids(
+        "", "+5585999998888", "a@b.com", "", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Qualquer Nome",
+    )
+    assert ids == [10]
+    assert method == "telefone"
 
 
 def test_contact_needs_new_event_lead_quando_sem_lead_deste_evento():

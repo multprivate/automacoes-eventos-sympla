@@ -77,7 +77,7 @@ def preview_participant(participant: dict, event_name: str, event_date: str, eve
     cpf = normalize_cpf(extract_cpf(participant))
     pid = participant.get("id")
 
-    contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email)
+    contact_ids, contact_match_method = find_matching_contact_ids(cpf, phone_key, email, full_name)
     if contact_ids:
         if len(contact_ids) > 1:
             primary_id = choose_primary_contact_id(contact_ids)
