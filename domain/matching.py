@@ -47,12 +47,21 @@ def names_are_compatible(name_a: str, name_b: str) -> bool:
 def _confirmar_candidatos(candidate_ids: list[int], full_name: str, get_name: NameLookupFn) -> list[int]:
     """Filtra candidatos de telefone/e-mail mantendo só os compatíveis por
     nome (`names_are_compatible`) — usado tanto na cascata de Lead quanto
-    na de Contato, mesma regra: sem candidatos ou sem nome no inscrito,
-    retorna como veio (não há sinal pra rejeitar); com nome, só passa
-    quem for a mesma pessoa."""
+    na de Contato, mesma regra dos dois lados: sem nome pra comparar (no
+    inscrito OU no candidato) não há sinal pra rejeitar, então aceita sem
+    confirmar (comportamento antigo); só rejeita quando dá pra comparar
+    E os nomes são incompatíveis. Sem isso, um Lead/Contato legítimo cujo
+    NAME esteja vazio no Bitrix (dado incompleto, não incomum) seria
+    sempre rejeitado por telefone/e-mail — o oposto do bug que esta
+    defesa existe pra evitar."""
     if not candidate_ids or not full_name:
         return candidate_ids
-    return [cid for cid in candidate_ids if names_are_compatible(full_name, get_name(cid))]
+    confirmados = []
+    for cid in candidate_ids:
+        nome_candidato = get_name(cid)
+        if not nome_candidato or names_are_compatible(full_name, nome_candidato):
+            confirmados.append(cid)
+    return confirmados
 
 
 def find_matching_lead_ids(

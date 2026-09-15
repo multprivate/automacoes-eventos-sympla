@@ -164,6 +164,22 @@ def test_email_bate_mas_sem_nome_no_inscrito_aceita_sem_confirmar():
     assert calls == {"cpf": 0, "phone": 0, "email": 1, "name": 0}
 
 
+def test_email_bate_mas_lead_encontrado_sem_nome_cadastrado_aceita_sem_confirmar():
+    """Mesmo raciocínio do teste acima, agora do outro lado: o Lead achado
+    por e-mail existe no Bitrix mas está com o campo NAME vazio (dado
+    incompleto, cadastro manual ou de outra integração) — sem nome pra
+    comparar, não há sinal pra rejeitar. Achado no code review: antes
+    desta correção, um Lead legítimo com NAME vazio era sempre rejeitado
+    (o oposto do bug que esta defesa existe pra evitar)."""
+    calls, by_cpf, by_phone, by_email, by_name = _lookups(email_result=[3])
+    ids, method = find_matching_lead_ids(
+        "", "", "a@b.com", "Fulano de Tal", by_cpf, by_phone, by_email, by_name,
+        get_lead_name=lambda _id: "",
+    )
+    assert ids == [3]
+    assert method == "email"
+
+
 def test_telefone_bate_com_nome_curto_confirma_contra_nome_completo_do_lead():
     """Caso real que quebrou com igualdade exata: inscrito registrado como
     'Kelly Sabina' no Sympla, Lead já cadastrado como 'KELLY SABINA PASSOS
@@ -328,6 +344,21 @@ def test_contato_telefone_bate_mas_sem_nome_no_inscrito_aceita_sem_confirmar():
     )
     assert ids == [10]
     assert method == "telefone"
+
+
+def test_contato_encontrado_sem_nome_cadastrado_aceita_sem_confirmar():
+    """Achado no code review: um Contato com NAME/LAST_NAME vazios no
+    Bitrix (dado incompleto) não deve ser sempre rejeitado por telefone/
+    e-mail só por falta de nome pra comparar — senão um cliente real
+    vira Lead duplicado sem CONTACT_ID, o oposto do bug que esta defesa
+    existe pra evitar."""
+    calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[44080])
+    ids, method = find_matching_contact_ids(
+        "", "", "cliente@exemplo.com", "Fulano de Tal", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "",
+    )
+    assert ids == [44080]
+    assert method == "email"
 
 
 def test_contact_needs_new_event_lead_quando_sem_lead_deste_evento():
