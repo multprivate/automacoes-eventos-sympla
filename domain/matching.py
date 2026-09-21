@@ -44,22 +44,51 @@ def names_are_compatible(name_a: str, name_b: str) -> bool:
     return menor.issubset(maior)
 
 
-def _confirmar_candidatos(candidate_ids: list[int], full_name: str, get_name: NameLookupFn) -> list[int]:
-    """Filtra candidatos de telefone/e-mail mantendo só os compatíveis por
-    nome (`names_are_compatible`) — usado tanto na cascata de Lead quanto
-    na de Contato, mesma regra dos dois lados: sem nome pra comparar (no
-    inscrito OU no candidato) não há sinal pra rejeitar, então aceita sem
-    confirmar (comportamento antigo); só rejeita quando dá pra comparar
-    E os nomes são incompatíveis. Sem isso, um Lead/Contato legítimo cujo
-    NAME esteja vazio no Bitrix (dado incompleto, não incomum) seria
-    sempre rejeitado por telefone/e-mail — o oposto do bug que esta
-    defesa existe pra evitar."""
-    if not candidate_ids or not full_name:
+def _confirmar_candidatos(
+    candidate_ids: list[int],
+    full_name: str,
+    get_name: NameLookupFn,
+    cpf: str = "",
+    get_cpf: NameLookupFn | None = None,
+) -> list[int]:
+    """Filtra candidatos de telefone/e-mail mantendo só os compatíveis com
+    o inscrito — usado tanto na cascata de Lead quanto na de Contato,
+    mesma regra dos dois lados.
+
+    CPF decide sozinho quando dá pra comparar (é o dado mais confiável que
+    existe, único por pessoa): CPF igual confirma o candidato mesmo que o
+    nome esteja muito diferente (apelido, nome social, erro de digitação
+    legado); CPF diferente REJEITA o candidato mesmo que o nome seja
+    compatível — achado real de produção (04/09): duas pessoas de uma
+    mesma família com CPFs diferentes usando o mesmo e-mail pra se
+    inscrever colapsaram na mesma pessoa porque só o nome era checado, e
+    nem sempre há nome suficiente pra pegar isso (ex: candidato com NAME
+    vazio no Bitrix, ver abaixo). Só cai pra comparação por nome quando
+    falta CPF de um dos dois lados pra comparar.
+
+    Nome (`names_are_compatible`) só decide quando não há CPF dos dois
+    lados pra comparar: sem nome pra comparar (no inscrito OU no
+    candidato) não há sinal pra rejeitar, então aceita sem confirmar
+    (comportamento antigo); só rejeita quando dá pra comparar E os nomes
+    são incompatíveis. Sem isso, um Lead/Contato legítimo cujo NAME esteja
+    vazio no Bitrix (dado incompleto, não incomum) seria sempre rejeitado
+    por telefone/e-mail — o oposto do bug que esta defesa existe pra
+    evitar."""
+    if not candidate_ids:
         return candidate_ids
     confirmados = []
     for cid in candidate_ids:
+        # Só busca o CPF do candidato quando dá pra comparar (inscrito tem
+        # CPF e o chamador sabe resolver o do candidato) — evita uma
+        # chamada extra ao Bitrix por candidato nos casos (a maioria, hoje)
+        # em que o inscrito não tem CPF no formulário de inscrição.
+        cpf_candidato = get_cpf(cid) if (cpf and get_cpf) else ""
+        if cpf_candidato:
+            if cpf_candidato == cpf:
+                confirmados.append(cid)
+            continue  # CPF decidiu (aceitou ou rejeitou) — nome nem entra
         nome_candidato = get_name(cid)
-        if not nome_candidato or names_are_compatible(full_name, nome_candidato):
+        if not full_name or not nome_candidato or names_are_compatible(full_name, nome_candidato):
             confirmados.append(cid)
     return confirmados
 
@@ -74,6 +103,7 @@ def find_matching_lead_ids(
     lookup_by_email: LookupFn,
     lookup_by_name: LookupFn,
     get_lead_name: NameLookupFn,
+    get_lead_cpf: NameLookupFn | None = None,
 ) -> tuple[list[int], str | None]:
     """get_lead_name resolve o NAME de um candidato achado por telefone ou
     e-mail, pra confirmar que é a mesma pessoa antes de aceitar o match —
@@ -87,6 +117,12 @@ def find_matching_lead_ids(
     pro próximo critério. Sem nome no inscrito, não há sinal pra
     rejeitar, então mantém o comportamento antigo (aceita sem confirmar).
 
+    get_lead_cpf (opcional) resolve o CPF do candidato — quando dá pra
+    comparar (os dois lados têm CPF), ele manda mais que o nome: igual
+    confirma mesmo com nome bem diferente, diferente rejeita mesmo com
+    nome compatível (ver _confirmar_candidatos). None desliga essa defesa
+    extra sem quebrar quem ainda não passa esse parâmetro.
+
     CPF (primeiro passo) NÃO passa por essa confirmação: é único por
     pessoa por definição, exigir nome bater em cima disso só criaria
     falso-negativo (nome legal diferente do nome usado no Sympla) sem
@@ -97,12 +133,12 @@ def find_matching_lead_ids(
             return lead_ids, "cpf"
 
     if phone_key:
-        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_lead_name)
+        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_lead_name, cpf, get_lead_cpf)
         if confirmed_ids:
             return confirmed_ids, "telefone"
 
     if email:
-        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_lead_name)
+        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_lead_name, cpf, get_lead_cpf)
         if confirmed_ids:
             return confirmed_ids, "email"
 
@@ -119,6 +155,7 @@ def find_matching_contact_ids(
     lookup_by_phone: LookupFn,
     lookup_by_email: LookupFn,
     get_contact_name: NameLookupFn,
+    get_contact_cpf: NameLookupFn | None = None,
 ) -> tuple[list[int], str | None]:
     """Cascata CPF -> telefone -> e-mail, sem fallback por NOME como
     critério de busca (diferente da cascata de Lead, que tenta um passo
@@ -128,30 +165,34 @@ def find_matching_contact_ids(
     inscrição de um estranho ao histórico de um cliente real, um erro bem
     mais caro do que o mesmo engano com um Lead desconhecido.
 
-    Mas telefone/e-mail SÃO confirmados por nome antes de aceitar
+    Mas telefone/e-mail SÃO confirmados antes de aceitar
     (`_confirmar_candidatos`, mesma defesa da cascata de Lead) — achado
     real de produção: duas pessoas diferentes de uma mesma família (ex:
     um casal) usando o mesmo e-mail pra comprar dois ingressos fazia a
     inscrição da SEGUNDA pessoa bater no Contato da PRIMEIRA (cliente de
-    verdade), colapsando as duas inscrições num Lead só. Se o nome não
-    confere, a pessoa não é tratada como Contato — cai pra cascata de
-    Lead comum, sem CONTACT_ID.
+    verdade), colapsando as duas inscrições num Lead só. get_contact_cpf
+    (opcional) fecha o ponto cego que deixou isso passar: um Contato com
+    NAME vazio no Bitrix não tinha nome pra comparar, então era aceito
+    sem confirmar — com CPF disponível dos dois lados, CPF diferente
+    rejeita o candidato mesmo sem nome nenhum pra comparar. Se não
+    confirma (por CPF ou por nome), a pessoa não é tratada como Contato
+    — cai pra cascata de Lead comum, sem CONTACT_ID.
 
-    CPF não passa por essa confirmação: é único por pessoa por definição,
-    por isso pode ser o primeiro critério com segurança, exatamente como
-    na cascata de Lead."""
+    CPF do INSCRITO (primeiro passo da cascata) não passa por essa
+    confirmação: é único por pessoa por definição, por isso pode ser o
+    primeiro critério com segurança, exatamente como na cascata de Lead."""
     if cpf:
         contact_ids = lookup_by_cpf(cpf)
         if contact_ids:
             return contact_ids, "cpf"
 
     if phone_key:
-        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_contact_name)
+        confirmed_ids = _confirmar_candidatos(lookup_by_phone(phone_key), full_name, get_contact_name, cpf, get_contact_cpf)
         if confirmed_ids:
             return confirmed_ids, "telefone"
 
     if email:
-        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_contact_name)
+        confirmed_ids = _confirmar_candidatos(lookup_by_email(email), full_name, get_contact_name, cpf, get_contact_cpf)
         if confirmed_ids:
             return confirmed_ids, "email"
 

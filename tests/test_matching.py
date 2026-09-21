@@ -221,6 +221,48 @@ def test_telefone_bate_com_dois_candidatos_so_um_com_nome_confere():
     assert calls == {"cpf": 0, "phone": 1, "email": 0, "name": 0}
 
 
+def test_email_bate_mas_cpf_diferente_rejeita_mesmo_com_nome_compativel():
+    """CPF é a prova mais forte de quem é a pessoa: mesmo com nome
+    compatível (ex: pai e filho, "Renato Pierot" vs "Renato Pierot Filho"),
+    CPFs diferentes provam que são pessoas diferentes -- rejeita, mesmo
+    que o e-mail seja compartilhado (compra em grupo/família)."""
+    calls, by_cpf, by_phone, by_email, by_name = _lookups(email_result=[3])
+    ids, method = find_matching_lead_ids(
+        "11111111111", "", "familia@exemplo.com", "Renato Pierot Filho", by_cpf, by_phone, by_email, by_name,
+        get_lead_name=lambda _id: "Renato Pierot",
+        get_lead_cpf=lambda _id: "22222222222",
+    )
+    assert ids == []
+    assert method is None
+
+
+def test_email_bate_e_cpf_tambem_bate_confirma_mesmo_com_nome_diferente():
+    """CPF batendo já é prova suficiente de ser a mesma pessoa -- confirma
+    mesmo que o nome esteja bem diferente do cadastrado (apelido, nome
+    social, erro de digitação legado)."""
+    calls, by_cpf, by_phone, by_email, by_name = _lookups(email_result=[3])
+    ids, method = find_matching_lead_ids(
+        "11111111111", "", "a@b.com", "Nome Bem Diferente", by_cpf, by_phone, by_email, by_name,
+        get_lead_name=lambda _id: "Nome Cadastrado Original",
+        get_lead_cpf=lambda _id: "11111111111",
+    )
+    assert ids == [3]
+    assert method == "email"
+
+
+def test_email_bate_sem_get_lead_cpf_mantem_comportamento_antigo_por_nome():
+    """Quem não passa get_lead_cpf (campo de CPF não configurado no
+    Bitrix) continua se comportando exatamente como antes -- a defesa de
+    CPF é aditiva, nunca obrigatória."""
+    calls, by_cpf, by_phone, by_email, by_name = _lookups(email_result=[3])
+    ids, method = find_matching_lead_ids(
+        "11111111111", "", "a@b.com", "Fulano", by_cpf, by_phone, by_email, by_name,
+        get_lead_name=lambda _id: "Fulano",
+    )
+    assert ids == [3]
+    assert method == "email"
+
+
 def test_telefone_bate_mas_sem_nome_no_inscrito_aceita_sem_confirmar():
     calls, by_cpf, by_phone, by_email, by_name = _lookups(phone_result=[1])
     ids, method = find_matching_lead_ids(
@@ -356,6 +398,32 @@ def test_contato_encontrado_sem_nome_cadastrado_aceita_sem_confirmar():
     ids, method = find_matching_contact_ids(
         "", "", "cliente@exemplo.com", "Fulano de Tal", by_cpf, by_phone, by_email,
         get_contact_name=lambda _id: "",
+    )
+    assert ids == [44080]
+    assert method == "email"
+
+
+def test_contato_encontrado_sem_nome_mas_cpf_diferente_ainda_rejeita():
+    """Fecha o ponto cego que o caso real Thiago/Manuela expôs: um Contato
+    com NAME vazio no Bitrix não tem nome pra comparar (aceitaria sem
+    confirmar, teste acima), mas com CPF disponível dos dois lados, CPF
+    diferente rejeita mesmo sem nome nenhum pra comparar."""
+    calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[44080])
+    ids, method = find_matching_contact_ids(
+        "28854238899", "", "manuelapaiva@yahoo.com.br", "Thiago Zambianco Cuim", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "",
+        get_contact_cpf=lambda _id: "79636624372",
+    )
+    assert ids == []
+    assert method is None
+
+
+def test_contato_email_bate_e_cpf_tambem_bate_confirma():
+    calls, by_cpf, by_phone, by_email = _contact_lookups(email_result=[44080])
+    ids, method = find_matching_contact_ids(
+        "79636624372", "", "manuelapaiva@yahoo.com.br", "Nome Diferente Do Cadastro", by_cpf, by_phone, by_email,
+        get_contact_name=lambda _id: "Manuela de Paiva Reginaldo",
+        get_contact_cpf=lambda _id: "79636624372",
     )
     assert ids == [44080]
     assert method == "email"

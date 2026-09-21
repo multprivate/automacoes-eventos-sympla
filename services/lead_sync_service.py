@@ -132,17 +132,24 @@ def find_matching_lead_ids(cpf: str, phone_key: str, email: str, full_name: str)
     preview_novos_leads.py importa esta função diretamente deste módulo.
     O código do campo de CPF é resolvido aqui via config_service (cache
     de 60s) em vez de vir por parâmetro — diferente de telefone/e-mail
-    (busca nativa do Bitrix), CPF é campo customizado configurável."""
+    (busca nativa do Bitrix), CPF é campo customizado configurável.
+
+    get_lead_cpf só é passado quando o campo de CPF do Lead está
+    configurado — sem campo configurado, não tem como ler o CPF de um
+    candidato, então a defesa extra de domain.matching fica desligada
+    (None) em vez de sempre bater vazio contra vazio."""
+    field_cpf_lead = config_service.get_field_cpf_lead()
     return _find_matching_lead_ids(
         cpf,
         phone_key,
         email,
         full_name,
-        lookup_by_cpf=lambda c: find_lead_ids_by_cpf(c, config_service.get_field_cpf_lead()),
+        lookup_by_cpf=lambda c: find_lead_ids_by_cpf(c, field_cpf_lead),
         lookup_by_phone=find_lead_ids_by_phone,
         lookup_by_email=find_lead_ids_by_email,
         lookup_by_name=find_lead_ids_by_name,
         get_lead_name=lambda lead_id: (get_lead(lead_id) or {}).get("NAME", ""),
+        get_lead_cpf=(lambda lead_id: normalize_cpf((get_lead(lead_id) or {}).get(field_cpf_lead, ""))) if field_cpf_lead else None,
     )
 
 
@@ -159,16 +166,20 @@ def _contact_full_name(contact: dict) -> str:
 def find_matching_contact_ids(cpf: str, phone_key: str, email: str, full_name: str) -> tuple[list[int], str | None]:
     """Fina casca sobre domain.matching para Contatos (clientes) — CPF,
     telefone e e-mail, sem passo de busca por NOME (ver domain/matching.py)
-    — mas telefone/e-mail SÃO confirmados por nome antes de aceitar."""
+    — mas telefone/e-mail SÃO confirmados (por CPF quando dá, senão por
+    nome) antes de aceitar. Mesmo raciocínio de get_lead_cpf acima: sem
+    campo de CPF do Contato configurado, a defesa extra fica desligada."""
+    field_cpf_contact = config_service.get_field_cpf_contact()
     return _find_matching_contact_ids(
         cpf,
         phone_key,
         email,
         full_name,
-        lookup_by_cpf=lambda c: find_contact_ids_by_cpf(c, config_service.get_field_cpf_contact()),
+        lookup_by_cpf=lambda c: find_contact_ids_by_cpf(c, field_cpf_contact),
         lookup_by_phone=find_contact_ids_by_phone,
         lookup_by_email=find_contact_ids_by_email,
         get_contact_name=lambda contact_id: _contact_full_name(get_contact(contact_id) or {}),
+        get_contact_cpf=(lambda contact_id: normalize_cpf((get_contact(contact_id) or {}).get(field_cpf_contact, ""))) if field_cpf_contact else None,
     )
 
 
