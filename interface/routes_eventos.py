@@ -9,6 +9,7 @@ import csv
 import io
 import logging
 import math
+import threading
 
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
@@ -53,22 +54,48 @@ def index():
 
 
 def _run_sync(event_id: str, force: bool) -> None:
+    """Adquire a trava NA HORA (síncrono — é o que dá o feedback imediato de
+    "já está rodando" pro clique duplo) e delega o trabalho de verdade pra
+    uma thread em segundo plano, retornando logo em seguida.
+
+    Antes rodava tudo síncrono dentro da própria requisição — pra um evento
+    grande com "Forçar campos" (reprocessa TODO mundo, não só quem é novo),
+    isso passava fácil de 1-2 minutos, e o proxy de borda da Railway/Render
+    na frente do gunicorn desiste da conexão bem antes disso (o gunicorn
+    tem --timeout 300, mas o proxy do provedor tem o dele próprio, fora do
+    nosso controle — incidente real: "upstream error" no painel enquanto o
+    processo seguia rodando e terminando com sucesso no servidor, sem que o
+    usuário tivesse como saber). Rodar em background elimina o timeout de
+    proxy por completo: a requisição HTTP volta em milissegundos, o
+    resultado real (criados/atualizados/erros) fica na aba Logs.
+
+    Trade-off aceito: se o processo do gunicorn for reciclado (deploy,
+    restart) enquanto a thread ainda roda, o trabalho pendente se perde sem
+    aviso — mesmo risco que já existia antes se o timeout do proxy batesse
+    primeiro que o do gunicorn (ver commit aae2566)."""
     try:
         acquire_lock(event_id, "painel")
     except SyncLockHeld as exc:
         flash(f"Evento {event_id}: {exc}", "erro")
         return
-    try:
-        result = sync_one_event(event_id, force=force)
-        if result["erros"]:
-            flash(f"Sincronização de {event_id} terminou com {result['erros']} erro(s). Veja a aba Logs.", "erro")
-        else:
-            flash(f"Evento {event_id} sincronizado: {result['leads_criados']} lead(s) criado(s), {result['leads_atualizados']} atualizado(s).", "ok")
-    except Exception as exc:
-        log.error("Falha ao sincronizar evento %s: %s", event_id, exc)
-        flash(f"Falha ao sincronizar {event_id}: {exc}", "erro")
-    finally:
-        release_lock(event_id)
+
+    def _worker() -> None:
+        try:
+            result = sync_one_event(event_id, force=force)
+            log.info(
+                "Sincronização em segundo plano de %s concluída: %d lead(s) criado(s), %d atualizado(s), %d erro(s).",
+                event_id, result["leads_criados"], result["leads_atualizados"], result["erros"],
+            )
+        except Exception as exc:
+            log.error("Falha ao sincronizar evento %s em segundo plano: %s", event_id, exc)
+        finally:
+            try:
+                release_lock(event_id)
+            except Exception as exc:
+                log.warning("Falha ao liberar a trava do evento %s após sincronização em segundo plano: %s", event_id, exc)
+
+    threading.Thread(target=_worker, daemon=True, name=f"sync-{event_id}").start()
+    flash(f"Sincronização de {event_id} iniciada em segundo plano — acompanhe o resultado na aba Logs em instantes.", "ok")
 
 
 @eventos_bp.route("/<event_id>/sincronizar", methods=["POST"])
