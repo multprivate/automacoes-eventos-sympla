@@ -76,6 +76,13 @@ FIELD_SPA_TOTAL_FALTOSOS = os.environ.get("BITRIX_FIELD_SPA_TOTAL_FALTOSOS", "uf
 FIELD_SPA_ULTIMA_SINCRONIZACAO = os.environ.get("BITRIX_FIELD_SPA_ULTIMA_SINCRONIZACAO", "ufCrm36_1774557862742")
 FIELD_SPA_NOME_EVENTO = os.environ.get("BITRIX_FIELD_SPA_NOME_EVENTO", "ufCrm36_1774557988935")
 
+# Campo de Lead "Cliente convidado para:" — lista com TODOS os eventos já
+# cadastrados na Sympla, ordenada da data mais recente pra mais antiga
+# (diferente de FIELD_FILTRAR_EVENTO, que só cresce sem reordenar — ver
+# services/campo_convidado_service.py). Não preenchido em nenhum Lead
+# automaticamente, só mantém as opções da lista em dia.
+FIELD_CLIENTE_CONVIDADO_PARA = os.environ.get("BITRIX_FIELD_CLIENTE_CONVIDADO_PARA", "UF_CRM_1785173622")
+
 # Campo espelhado (mesmo nome) tanto em Lead quanto em Contact — aponta pro
 # ID do item da SPA ao qual aquele Lead/Contact está vinculado.
 FIELD_PARENT_ID_EVENTO_SPA = "PARENT_ID_1112"

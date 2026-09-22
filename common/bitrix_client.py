@@ -171,6 +171,71 @@ def _merge_enum_items(current_items: list[dict], new_values: list[str]) -> tuple
     return merged, faltando
 
 
+def merge_enum_items_sorted(current_items: list[dict], ordered_values: list[str]) -> list[dict]:
+    """Como _merge_enum_items, mas pra campos que precisam ficar SEMPRE na
+    mesma ordem de `ordered_values` (ex: "Cliente convidado para:", todos
+    os eventos da Sympla da data mais recente pra mais antiga) — diferente
+    de _merge_enum_items, que só sabe anexar no fim e nunca reordena quem
+    já existe.
+
+    Reaproveita o ID de quem já existe (nunca recria: um Lead pode já
+    apontar pra esse ID pelo valor selecionado), cria sem ID quem é novo, e
+    escreve o SORT de todo mundo do zero, sequencialmente, na ordem de
+    `ordered_values` (10, 20, 30...). Um valor que exista hoje mas não
+    esteja em `ordered_values` (não deveria acontecer — a Sympla não perde
+    evento — mas por segurança) é preservado no fim, na ordem antiga entre
+    si, em vez de silenciosamente desaparecer da lista.
+
+    Cada item de `current_items` aparece exatamente uma vez no resultado —
+    achado em code review: se o campo já tiver DUAS entradas com o mesmo
+    VALUE (dado sujo pré-existente, ex: duplicata criada manualmente), um
+    dict `{VALUE: ID}` colapsaria as duas na mesma chave e uma das duas
+    IDs desapareceria da lista sem aviso, quebrando o Lead que apontava
+    pra ela. Por isso o controle é por item, não por um mapa VALUE->ID:
+    só a PRIMEIRA ocorrência de cada valor (em ordem de aparição em
+    current_items) vira a entrada "oficial" daquele valor; qualquer outra
+    — duplicata de VALUE ou valor fora de ordered_values — é preservada
+    no fim, com a própria ID, em vez de ser descartada.
+
+    `ordered_values` em si também é deduplicado (mantendo a primeira
+    ocorrência) — achado em code review: se o CHAMADOR passar o mesmo
+    valor duas vezes (ex: dois eventos com nome e data formatados pro
+    mesmo texto), sem isso o resultado teria duas entradas com a MESMA ID
+    reaproveitada, um payload inválido pro Bitrix que corrompe/colapsa uma
+    das duas."""
+    ordered_set = set(ordered_values)
+    id_by_value: dict[str, str] = {}
+    resto: list[dict] = []
+    for item in current_items:
+        valor = item.get("VALUE")
+        if valor in ordered_set and valor not in id_by_value:
+            id_by_value[valor] = item.get("ID")
+        else:
+            resto.append(item)
+
+    merged = []
+    sort = 10
+    valores_ja_colocados: set[str] = set()
+    for valor in ordered_values:
+        if valor in valores_ja_colocados:
+            continue
+        valores_ja_colocados.add(valor)
+        item = {"VALUE": valor, "SORT": sort}
+        item_id = id_by_value.get(valor)
+        if item_id is not None:
+            item["ID"] = item_id
+        merged.append(item)
+        sort += 10
+    for item in resto:
+        preservado = {"VALUE": item.get("VALUE"), "SORT": sort}
+        item_id = item.get("ID")
+        if item_id is not None:
+            preservado["ID"] = item_id
+        merged.append(preservado)
+        sort += 10
+    return merged
+
+
 def ensure_enum_value(field_code: str, value_text: str) -> str:
     """Como resolve_enum_id, mas ADICIONA o item na lista do campo se ele
     ainda não existir, em vez de levantar erro — pensado pra listas que
