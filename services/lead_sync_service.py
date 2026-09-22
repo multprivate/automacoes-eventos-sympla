@@ -225,8 +225,16 @@ def find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date
 
     Nunca mexe em stageId (a coluna Kanban do item) — isso é decisão
     humana/comercial, mesmo espírito da defesa que já existe pra nunca
-    promover sozinho um Lead de funil antigo."""
+    promover sozinho um Lead de funil antigo.
+
+    "title" entra em stat_fields (reenviado em TODA sincronização, não só
+    na criação) de propósito: se o evento for reagendado na Sympla depois
+    que o item já existe, o título (montado uma vez, na criação) ficava
+    desatualizado pra sempre — achado real, ver o Churrasco da
+    MultPrivate, adiado de 15/08 pra 19/09 com o item já criado. Reenviar
+    a cada rodada mantém título e nome/data sempre em dia com a Sympla."""
     stat_fields = {
+        "title": format_event_label(event_name, event_date),
         FIELD_SPA_TOTAL_INSCRITOS: inscritos_count,
         FIELD_SPA_TOTAL_PRESENTES: presentes_count,
         FIELD_SPA_TOTAL_FALTOSOS: inscritos_count - presentes_count,
@@ -237,9 +245,8 @@ def find_or_create_evento_item(sympla_event_id: str, event_name: str, event_date
         item = spa_find_item_by_sympla_event_id(sympla_event_id)
         if item is None:
             item_id = spa_add_item({
-                "title": f"{event_name} ({event_date})" if event_date else event_name,
-                FIELD_SPA_SYMPLA_EVENT_ID: sympla_event_id,
                 **stat_fields,
+                FIELD_SPA_SYMPLA_EVENT_ID: sympla_event_id,
             })
             log.info("Item novo criado na SPA Eventos Sympla pro evento %s (id interno %s): item %s.", event_name, sympla_event_id, item_id)
         else:

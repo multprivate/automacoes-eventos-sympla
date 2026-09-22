@@ -782,3 +782,57 @@ class TestCreateLeadFromParticipantPosEvento:
         add_payload = next(p for m, p in calls if m == "crm.lead.add")
         assert add_payload["fields"]["STATUS_ID"] == "NEWINSCRITO"
         assert "UF_PRESENTE" not in add_payload["fields"]
+
+
+class TestFindOrCreateEventoItem:
+    def test_cria_item_novo_com_titulo_formatado(self, monkeypatch):
+        monkeypatch.setattr(lead_sync_service, "spa_find_item_by_sympla_event_id", lambda sympla_event_id: None)
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "spa_add_item", lambda fields: calls.append(fields) or 42)
+
+        item_id = lead_sync_service.find_or_create_evento_item("s1", "Workshop", "2026-03-04", 10, 3)
+
+        assert item_id == 42
+        fields = calls[0]
+        assert fields["title"] == "04/03/26 - Workshop"
+        assert fields[lead_sync_service.FIELD_SPA_SYMPLA_EVENT_ID] == "s1"
+
+    def test_item_existente_reenvia_titulo_atualizado_no_update(self, monkeypatch):
+        """Achado real: evento reagendado na Sympla depois que o item já
+        existia (Churrasco da MultPrivate, 15/08 -> 19/09) deixava o
+        título velho pra sempre, porque a atualização não reenviava
+        title (só os contadores agregados). Precisa reenviar title em
+        TODA sincronização, não só na criação."""
+        monkeypatch.setattr(lead_sync_service, "spa_find_item_by_sympla_event_id", lambda sympla_event_id: {"id": "7"})
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "spa_update_item", lambda item_id, fields: calls.append((item_id, fields)))
+
+        item_id = lead_sync_service.find_or_create_evento_item("s1", "Workshop Remarcado", "2026-09-19", 10, 3)
+
+        assert item_id == 7
+        updated_item_id, fields = calls[0]
+        assert updated_item_id == 7
+        assert fields["title"] == "19/09/26 - Workshop Remarcado"
+
+    def test_evento_sem_data_usa_o_mesmo_placeholder_do_filtrar_evento(self, monkeypatch):
+        """event_date vazio (Sympla sem start_date) antes caía num fallback
+        PRÓPRIO deste código (nome puro, sem data) -- agora passa por
+        format_event_label como qualquer outro label de evento do
+        sistema, unificando com o placeholder que o Filtrar Evento já usa
+        pro mesmo caso ("??/??/?? - Nome"), em vez de ter dois
+        comportamentos diferentes pra "sem data" dependendo de qual campo."""
+        monkeypatch.setattr(lead_sync_service, "spa_find_item_by_sympla_event_id", lambda sympla_event_id: None)
+        calls = []
+        monkeypatch.setattr(lead_sync_service, "spa_add_item", lambda fields: calls.append(fields) or 42)
+
+        lead_sync_service.find_or_create_evento_item("s1", "Workshop", "", 10, 3)
+
+        assert calls[0]["title"] == "??/??/?? - Workshop"
+
+    def test_falha_e_fail_aberto_retorna_none(self, monkeypatch):
+        def _raise(sympla_event_id):
+            raise RuntimeError("Bitrix fora do ar")
+
+        monkeypatch.setattr(lead_sync_service, "spa_find_item_by_sympla_event_id", _raise)
+
+        assert lead_sync_service.find_or_create_evento_item("s1", "Workshop", "2026-03-04", 10, 3) is None
