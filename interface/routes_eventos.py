@@ -150,10 +150,18 @@ _ETAPA_ROTULOS = {
 
 
 def _preencher_assessores(event_id: str, participants: list[dict], linhas: list[dict], responsavel_by_lead_id: dict[str, str]) -> None:
-    """Preenche linha["assessor_cupom"] (quem trouxe, pelo cupom do pedido
-    na Sympla) e linha["responsavel_bitrix"] (dono atual do Lead). Falha
-    ABERTO, como o funil: sem permissão de usuários no Bitrix, ou com a
-    Sympla/Supabase fora, as colunas ficam vazias e a lista continua."""
+    """Preenche linha["cupom"] (código usado no pedido da Sympla),
+    linha["assessor_cupom"] (dono do cupom, usado no filtro) e
+    linha["responsavel_bitrix"] (dono atual do Lead). Falha ABERTO, como o
+    funil: sem permissão de usuários no Bitrix, ou com a Sympla/Supabase
+    fora, as colunas ficam vazias e a lista continua."""
+    try:
+        get_cupom_map = build_cupom_map_loader(event_id)
+        for participant, linha in zip(participants, linhas):
+            linha["cupom"] = extract_discount_code(participant, get_cupom_map) or None
+    except Exception as exc:
+        log.warning("Falha ao buscar cupons de %s: %s", event_id, exc)
+
     try:
         nomes_por_id, nomes_por_email = get_user_names()
     except Exception as exc:
@@ -177,10 +185,8 @@ def _preencher_assessores(event_id: str, participants: list[dict], linhas: list[
 
     try:
         assessor_por_cupom, _ = load_coupon_maps()
-        get_cupom_map = build_cupom_map_loader(event_id)
-        for participant, linha in zip(participants, linhas):
-            cupom = extract_discount_code(participant, get_cupom_map)
-            linha["assessor_cupom"] = resolver_assessor_do_cupom(cupom, assessor_por_cupom, nomes_por_email)
+        for linha in linhas:
+            linha["assessor_cupom"] = resolver_assessor_do_cupom(linha["cupom"] or "", assessor_por_cupom, nomes_por_email)
     except Exception as exc:
         log.warning("Falha ao resolver cupom→assessor de %s: %s", event_id, exc)
 
@@ -339,11 +345,11 @@ def exportar_inscritos_csv(event_id):
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "etapa_lead", "assessor_cupom", "responsavel_bitrix", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
+    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "etapa_lead", "cupom", "assessor_cupom", "responsavel_bitrix", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
     for l in linhas_filtradas:
         writer.writerow([
             l["participant_id"], l["nome"], l["email"], l["telefone"], l["cpf"], l["status"],
-            l["match_method"] or "", l["etapa_rotulo"] or "", l["assessor_cupom"] or "", l["responsavel_bitrix"] or "", l["processado_em"] or "", l["verificado_em"] or "",
+            l["match_method"] or "", l["etapa_rotulo"] or "", l["cupom"] or "", l["assessor_cupom"] or "", l["responsavel_bitrix"] or "", l["processado_em"] or "", l["verificado_em"] or "",
             l["contact_id"] or "", l["lead_id"] or "", "sim" if l["checkin"] else "não",
         ])
 

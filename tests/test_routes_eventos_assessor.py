@@ -39,6 +39,7 @@ def test_preenche_assessor_do_cupom_e_responsavel_do_lead(monkeypatch):
 
     routes_eventos._preencher_assessores("evt", participantes, linhas, {"10": "7", "12": "999"})
 
+    assert [l["cupom"] for l in linhas] == ["100.00% - BRUNA", None, "CUPOM-DESCONHECIDO"]
     assert [l["assessor_cupom"] for l in linhas] == ["Bruna Tassia", None, None]
     assert [l["responsavel_bitrix"] for l in linhas] == ["Bruna Tassia", None, "Usuário #999"]
 
@@ -97,7 +98,7 @@ def test_pagina_inscritos_renderiza_colunas_e_filtra_por_assessor(monkeypatch):
         sessao["admin_logado"] = True
 
     todos = client.get("/eventos/evt/inscritos").get_data(as_text=True)
-    assert "Trouxe (cupom)" in todos and "Responsável (Bitrix)" in todos
+    assert ">Cupom<" in todos and "100.00% - BRUNA" in todos and "Responsável (Bitrix)" in todos
     assert "Pessoa1 Teste" in todos and "Pessoa2 Teste" in todos
 
     filtrado = client.get("/eventos/evt/inscritos?assessor=Bruna Tassia").get_data(as_text=True)
@@ -107,5 +108,5 @@ def test_pagina_inscritos_renderiza_colunas_e_filtra_por_assessor(monkeypatch):
     assert "Pessoa2 Teste" in sem and "Pessoa1 Teste" not in sem
 
     csv_resposta = client.get("/eventos/evt/inscritos/exportar.csv?assessor=Bruna Tassia").get_data(as_text=True)
-    assert "assessor_cupom,responsavel_bitrix" in csv_resposta
+    assert "cupom,assessor_cupom,responsavel_bitrix" in csv_resposta
     assert "Pessoa1 Teste" in csv_resposta and "Pessoa2 Teste" not in csv_resposta

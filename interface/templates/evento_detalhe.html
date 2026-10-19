@@ -85,7 +85,7 @@
     <thead>
         <tr>
             <th>Inscrito</th><th>Contato</th><th>Cliente</th><th>Match</th>
-            <th>Encontrado em</th><th>Check-in</th><th>Bitrix</th><th>Etapa do Lead</th><th>Trouxe (cupom)</th><th>Responsável (Bitrix)</th><th>Ações</th>
+            <th>Encontrado em</th><th>Check-in</th><th>Bitrix</th><th>Etapa do Lead</th><th>Cupom</th><th>Responsável (Bitrix)</th><th>Ações</th>
         </tr>
     </thead>
     <tbody>
@@ -122,7 +122,7 @@
             <td>
                 {% if l.etapa_rotulo %}<small>{{ l.etapa_rotulo }}</small>{% else %}–{% endif %}
             </td>
-            <td>{{ l.assessor_cupom or "–" }}</td>
+            <td>{% if l.cupom %}<code>{{ l.cupom }}</code>{% else %}–{% endif %}</td>
             <td>{{ l.responsavel_bitrix or "–" }}</td>
             <td>
                 <div class="actions-stack">

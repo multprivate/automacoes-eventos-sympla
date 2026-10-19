@@ -48,6 +48,7 @@ def build_inscritos_view(participants: list[dict], resultados: dict[str, dict]) 
             "lead_id": (resultado or {}).get("bitrix_lead_id"),
             "contact_ids_duplicados": contact_ids_duplicados,
             "tem_duplicado": bool(contact_ids_duplicados),
+            "cupom": None,
             "assessor_cupom": None,
             "responsavel_bitrix": None,
         })
