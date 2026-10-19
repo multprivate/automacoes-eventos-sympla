@@ -2,7 +2,7 @@
 Regra de avanço de estágio de um Lead quando bate uma inscrição nova.
 Função pura: recebe o Lead já buscado (dict) e os fatos do evento, decide
 só quais campos deveriam mudar — quem chama de fato o Bitrix é
-automacao_a_inscricoes.py.
+scripts/automacao_a_inscricoes.py.
 """
 
 import logging

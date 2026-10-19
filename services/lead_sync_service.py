@@ -4,7 +4,7 @@ inscrito com um Lead do Bitrix24 (CPF → telefone → e-mail → nome), avança
 o estágio quando aplicável ou cria um Lead novo, resolvendo cupom→assessor
 via services/coupon_service.py.
 
-Extraído de automacao_a_inscricoes.py (que virou um wrapper de CLI fino
+Extraído de scripts/automacao_a_inscricoes.py (que virou um wrapper de CLI fino
 por cima daqui) pra ter DOIS pontos de entrada usados igualmente pelo
 Cron Job agendado e pelo painel administrativo:
 - sync_all_upcoming_events(): o fluxo de sempre, todos os eventos futuros.
@@ -129,7 +129,7 @@ def find_lead_ids_by_name(full_name: str) -> list[int]:
 def find_matching_lead_ids(cpf: str, phone_key: str, email: str, full_name: str) -> tuple[list[int], str | None]:
     """Fina casca sobre domain.matching: liga a cascata de decisão (pura)
     às buscas reais no Bitrix. Mantida com esta assinatura porque
-    preview_novos_leads.py importa esta função diretamente deste módulo.
+    scripts/preview_novos_leads.py importa esta função diretamente deste módulo.
     O código do campo de CPF é resolvido aqui via config_service (cache
     de 60s) em vez de vir por parâmetro — diferente de telefone/e-mail
     (busca nativa do Bitrix), CPF é campo customizado configurável.

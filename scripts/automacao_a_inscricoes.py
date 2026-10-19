@@ -6,7 +6,7 @@ no serviço; este módulo só existe como ponto de entrada de linha de
 comando (pensado pra rodar via Cron Job/GitHub Actions).
 
 Uso:
-    python automacao_a_inscricoes.py
+    python -m scripts.automacao_a_inscricoes
 """
 
 import logging

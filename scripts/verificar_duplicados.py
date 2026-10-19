@@ -6,7 +6,7 @@ como ponto de entrada de linha de comando (pensado pra rodar via GitHub
 Actions, uma vez por dia).
 
 Uso:
-    python verificar_duplicados.py
+    python -m scripts.verificar_duplicados
 """
 
 import logging

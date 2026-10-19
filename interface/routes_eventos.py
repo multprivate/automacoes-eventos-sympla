@@ -13,12 +13,14 @@ import threading
 
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
-from common import find_leads_by_evento_item, get_sympla_all_participants, spa_find_item_by_sympla_event_id
+from common import extract_discount_code, find_leads_by_evento_item, get_lead_owners, get_sympla_all_participants, get_user_names, spa_find_item_by_sympla_event_id
 from domain.funil_conversao import classificar_lead, resumo_funil
 from repositories import eventos_config_repo, processed_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
 from services import config_service
+from services.coupon_service import load_coupon_maps
 from services.lead_sync_service import (
+    build_cupom_map_loader,
     find_or_create_evento_item,
     get_event_or_raise,
     new_stats,
@@ -30,7 +32,15 @@ from services.lead_sync_service import (
 from .auth import login_required
 from .bitrix_links import contact_url, lead_url
 from .eventos_helper import list_all_events_view
-from .inscritos_helper import build_inscritos_view, filter_linhas, montar_funil_barras, resumo_conversao
+from .inscritos_helper import (
+    SEM_ASSESSOR,
+    build_inscritos_view,
+    filter_linhas,
+    listar_assessores,
+    montar_funil_barras,
+    resolver_assessor_do_cupom,
+    resumo_conversao,
+)
 
 log = logging.getLogger("interface.eventos")
 
@@ -60,7 +70,7 @@ def _run_sync(event_id: str, force: bool) -> None:
 
     Antes rodava tudo síncrono dentro da própria requisição — pra um evento
     grande com "Forçar campos" (reprocessa TODO mundo, não só quem é novo),
-    isso passava fácil de 1-2 minutos, e o proxy de borda da Railway/Render
+    isso passava fácil de 1-2 minutos, e o proxy de borda da Railway
     na frente do gunicorn desiste da conexão bem antes disso (o gunicorn
     tem --timeout 300, mas o proxy do provedor tem o dele próprio, fora do
     nosso controle — incidente real: "upstream error" no painel enquanto o
@@ -139,6 +149,48 @@ _ETAPA_ROTULOS = {
 }
 
 
+def _preencher_assessores(event_id: str, participants: list[dict], linhas: list[dict], responsavel_by_lead_id: dict[str, str]) -> None:
+    """Preenche linha["cupom"] (código usado no pedido da Sympla),
+    linha["assessor_cupom"] (dono do cupom, usado no filtro) e
+    linha["responsavel_bitrix"] (dono atual do Lead). Falha ABERTO, como o
+    funil: sem permissão de usuários no Bitrix, ou com a Sympla/Supabase
+    fora, as colunas ficam vazias e a lista continua."""
+    try:
+        get_cupom_map = build_cupom_map_loader(event_id)
+        for participant, linha in zip(participants, linhas):
+            linha["cupom"] = extract_discount_code(participant, get_cupom_map) or None
+    except Exception as exc:
+        log.warning("Falha ao buscar cupons de %s: %s", event_id, exc)
+
+    try:
+        nomes_por_id, nomes_por_email = get_user_names()
+    except Exception as exc:
+        log.warning("Falha ao listar usuários do Bitrix (assessores de %s): %s", event_id, exc)
+        return
+
+    # Leads que o processamento achou mas que não estão vinculados ao item
+    # da SPA do evento não vêm na lista do funil: busca o dono direto.
+    faltando = [l["lead_id"] for l in linhas if l["lead_id"] and str(l["lead_id"]) not in responsavel_by_lead_id]
+    if faltando:
+        try:
+            responsavel_by_lead_id = {**responsavel_by_lead_id, **get_lead_owners(faltando)}
+        except Exception as exc:
+            log.warning("Falha ao buscar responsável de Leads fora do funil de %s: %s", event_id, exc)
+
+    for linha in linhas:
+        lead_id = str(linha["lead_id"]) if linha["lead_id"] else ""
+        user_id = responsavel_by_lead_id.get(lead_id, "")
+        if user_id:
+            linha["responsavel_bitrix"] = nomes_por_id.get(user_id) or f"Usuário #{user_id}"
+
+    try:
+        assessor_por_cupom, _ = load_coupon_maps()
+        for linha in linhas:
+            linha["assessor_cupom"] = resolver_assessor_do_cupom(linha["cupom"] or "", assessor_por_cupom, nomes_por_email)
+    except Exception as exc:
+        log.warning("Falha ao resolver cupom→assessor de %s: %s", event_id, exc)
+
+
 def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
     """Busca tudo que a aba Inscritos precisa: o evento, os participantes
     ao vivo da Sympla juntados com o resultado do match persistido
@@ -187,6 +239,7 @@ def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
         linha["etapa_rotulo"] = None
 
     funil = None
+    responsavel_by_lead_id: dict[str, str] = {}
     try:
         item = spa_find_item_by_sympla_event_id(event_id)
         if item:
@@ -198,6 +251,7 @@ def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
             funil = resumo_funil(leads, stage_inscrito, stage_pos_evento, stage_reuniao)
 
             status_by_lead_id = {str(l["ID"]): l.get("STATUS_ID") for l in leads}
+            responsavel_by_lead_id = {str(l["ID"]): str(l.get("ASSIGNED_BY_ID") or "") for l in leads}
             for linha in linhas:
                 status_id = status_by_lead_id.get(str(linha["lead_id"])) if linha["lead_id"] else None
                 if status_id is not None:
@@ -206,6 +260,8 @@ def _montar_dados_evento(event_id: str) -> tuple[dict, list[dict], dict | None]:
                     linha["etapa_rotulo"] = _ETAPA_ROTULOS[bucket]
     except Exception as exc:
         log.warning("Falha ao montar funil de conversão de %s: %s", event_id, exc)
+
+    _preencher_assessores(event_id, participants, linhas, responsavel_by_lead_id)
 
     evento_view = {
         "id": event_id,
@@ -248,7 +304,8 @@ def inscritos(event_id):
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     etapa = request.args.get("etapa", "")
-    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa)
+    assessor = request.args.get("assessor", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa, assessor=assessor)
 
     resumo = resumo_conversao(linhas)
 
@@ -261,7 +318,8 @@ def inscritos(event_id):
         "evento_detalhe.html", evento=evento_view, linhas=pagina, resumo=resumo,
         funil=funil, funil_barras=montar_funil_barras(funil), etapa_rotulos=_ETAPA_ROTULOS,
         page=page, total_paginas=total_paginas, total=len(linhas_filtradas), total_geral=len(linhas),
-        q=q, status=status, etapa=etapa,
+        q=q, status=status, etapa=etapa, assessor=assessor,
+        assessores=listar_assessores(linhas), sem_assessor=SEM_ASSESSOR,
     )
 
 
@@ -282,15 +340,16 @@ def exportar_inscritos_csv(event_id):
     q = request.args.get("q", "").strip()
     status = request.args.get("status", "")
     etapa = request.args.get("etapa", "")
-    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa)
+    assessor = request.args.get("assessor", "")
+    linhas_filtradas = filter_linhas(linhas, q=q, status=status, etapa=etapa, assessor=assessor)
 
     buffer = io.StringIO()
     writer = csv.writer(buffer)
-    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "etapa_lead", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
+    writer.writerow(["participant_id", "nome", "email", "telefone", "cpf", "status", "match_method", "etapa_lead", "cupom", "assessor_cupom", "responsavel_bitrix", "encontrado_em", "verificado_em", "contact_id", "lead_id", "checkin"])
     for l in linhas_filtradas:
         writer.writerow([
             l["participant_id"], l["nome"], l["email"], l["telefone"], l["cpf"], l["status"],
-            l["match_method"] or "", l["etapa_rotulo"] or "", l["processado_em"] or "", l["verificado_em"] or "",
+            l["match_method"] or "", l["etapa_rotulo"] or "", l["cupom"] or "", l["assessor_cupom"] or "", l["responsavel_bitrix"] or "", l["processado_em"] or "", l["verificado_em"] or "",
             l["contact_id"] or "", l["lead_id"] or "", "sim" if l["checkin"] else "não",
         ])
 
@@ -318,7 +377,8 @@ def reprocessar_inscrito(event_id, participant_id):
     q = request.form.get("q", "")
     status = request.form.get("status", "")
     etapa = request.form.get("etapa", "")
-    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page, q=q, status=status, etapa=etapa)
+    assessor = request.form.get("assessor", "")
+    redirect_url = url_for("eventos.inscritos", event_id=event_id, page=page, q=q, status=status, etapa=etapa, assessor=assessor)
 
     try:
         acquire_lock(event_id, "painel")

@@ -8,7 +8,7 @@ o FIELD_NAME funciona porque os campos que este script cria sempre usam a
 mesma convenção de nome.
 
 Uso:
-    python setup_custom_fields.py
+    python -m scripts.setup_custom_fields
 """
 
 from common import (
@@ -122,7 +122,7 @@ def main() -> None:
     # Lista/enumeration com TODOS os eventos (passados e futuros), pra
     # aparecer como checkbox de múltipla seleção na aba de Filtros da
     # listagem de Leads. Diferente de ORIGEM/PRESENTE_NO_EVENTO (valores
-    # fixos), essa lista cresce em runtime — automacao_a_inscricoes.py
+    # fixos), essa lista cresce em runtime — scripts/automacao_a_inscricoes.py
     # adiciona um item novo por evento novo via common.ensure_enum_value().
     # Aqui só pré-populamos com o que já existe, em ordem cronológica.
     eventos = sorted(get_all_events(), key=lambda e: (e.get("start_date") or ""))

@@ -3,3 +3,7 @@
 __pycache__/
 *.pyc
 .cache/
+.vscode/
+.pytest_cache/
+.claude/
+*.csv

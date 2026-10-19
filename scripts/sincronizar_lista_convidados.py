@@ -6,7 +6,7 @@ GitHub Actions, uma vez por dia (tarefa de baixa urgência, não reage a
 inscrição nova de ninguém).
 
 Uso:
-    python sincronizar_lista_convidados.py
+    python -m scripts.sincronizar_lista_convidados
 """
 
 import logging

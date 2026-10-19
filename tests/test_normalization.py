@@ -194,8 +194,8 @@ class TestFormatEventLabel:
         assert format_event_label("Workshop", "") == "??/??/?? - Workshop"
 
     def test_identico_para_mesmo_input(self):
-        """Garantia crítica: setup_custom_fields.py (backfill em massa) e
-        automacao_a_inscricoes.py (incremental) precisam gerar o MESMO
+        """Garantia crítica: scripts/setup_custom_fields.py (backfill em massa) e
+        scripts/automacao_a_inscricoes.py (incremental) precisam gerar o MESMO
         texto pro mesmo evento, ou o Bitrix ganha itens de lista duplicados."""
         a = format_event_label("IMAGEM É PATRIMÔNIO", "2026-08-03")
         b = format_event_label("IMAGEM É PATRIMÔNIO", "2026-08-03")

@@ -39,19 +39,25 @@ O motor tenta achar um Lead já existente antes de criar um novo (telefone → e
 |---|---|
 | `common/` | Chamadas às APIs da Sympla e do Bitrix24 (com retry em falha transitória), normalização pura (telefone/e-mail/nome/CPF), e constantes/config vindas do `.env`. |
 | `domain/` | Regras de negócio puras, sem chamada de rede: quando avançar estágio, cascata de matching, cupom → assessor/origem, mesclagem de duplicados. Testável sem credencial real. |
-| `services/` | Orquestração — `lead_sync_service.py` é o motor de verdade; `config_service.py`/`coupon_service.py` resolvem config/cupom via Supabase com fallback fixo; `duplicidade_service.py` cuida da varredura de duplicados. |
+| `services/` | Orquestração — `lead_sync_service.py` é o motor de verdade; `config_service.py`/`coupon_service.py` resolvem config/cupom via Supabase com fallback fixo; `duplicidade_service.py` cuida da varredura de duplicados; `campo_convidado_service.py` mantém as opções do campo "Cliente convidado para". |
 | `repositories/` | Acesso ao Supabase via REST (PostgREST), um wrapper fino por tabela. |
 | `interface/` | O painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Verificação de Duplicados/Logs), Blueprints Flask. |
-| `automacao_a_inscricoes.py` | Wrapper de CLI fino sobre `lead_sync_service.sync_all_upcoming_events()` — o que o GitHub Actions chama. |
-| `interface_app.py` | Ponto de entrada do painel administrativo. |
-| `verificar_duplicados.py` | Wrapper de CLI fino sobre `duplicidade_service.detectar_duplicados_por_telefone()` — varredura diária de Leads duplicados. |
-| `setup_custom_fields.py` | Garante que os campos customizados e estágios que o motor precisa existem no Bitrix. Roda uma vez, ou de novo quando algo muda. |
-| `preview_novos_leads.py` | Mostra o que a sincronização faria em cada inscrito, sem escrever nada no Bitrix. |
-| `relatorio_participantes.py` | Script pontual pra gerar um CSV com todos os participantes de todos os eventos, cruzando com o Bitrix. Não faz parte do ciclo normal. |
-| `.github/workflows/automacao_a.yml` | Agenda o motor de sincronização no GitHub Actions. |
-| `.github/workflows/verificar_duplicados.yml` | Agenda a varredura de duplicados (diária). |
+| `scripts/` | Pontos de entrada de linha de comando, rodados com `python -m scripts.<nome>` (ver abaixo). |
+| `interface_app.py` | Ponto de entrada do painel administrativo (`gunicorn interface_app:app`). |
+| `supabase/migrations/` | Migrations SQL do painel, aplicadas em ordem numérica. A `0001` (tabelas base) não está versionada aqui — foi aplicada direto no Supabase. |
+| `tests/` | Testes `pytest` (`pip install -r requirements-dev.txt`). |
+| `.github/workflows/` | Agendamentos no GitHub Actions: sincronização (`automacao_a.yml`), varredura de duplicados (`verificar_duplicados.yml`, diária) e lista de eventos do campo "Cliente convidado para" (`sincronizar_lista_convidados.yml`, diária). |
 | `railpack.json` | Comando de start do painel administrativo no Railway. |
-| `render.yaml` | Blueprint do Render (alternativa de hospedagem) pro painel administrativo. |
+
+Conteúdo de `scripts/`:
+
+| Script | O que faz |
+|---|---|
+| `automacao_a_inscricoes` | Wrapper fino sobre `lead_sync_service.sync_all_upcoming_events()` — o que o GitHub Actions chama. |
+| `verificar_duplicados` | Wrapper fino sobre `duplicidade_service.detectar_duplicados_por_telefone()`. |
+| `sincronizar_lista_convidados` | Wrapper fino sobre `campo_convidado_service.sincronizar_opcoes_evento()`. |
+| `setup_custom_fields` | Garante que os campos customizados e estágios que o motor precisa existem no Bitrix. Roda uma vez, ou de novo quando algo muda. |
+| `preview_novos_leads` | Mostra o que a sincronização faria em cada inscrito, sem escrever nada no Bitrix. |
 
 Detalhes de como cada peça funciona por dentro (formato dos dados da Sympla, lógica de matching, cache, peculiaridades da API do Bitrix) estão em [`docs/ARQUITETURA.md`](docs/ARQUITETURA.md). Passo a passo de operação do dia a dia (adicionar assessor, testar com segurança, resolver erro comum) está em [`docs/OPERACAO.md`](docs/OPERACAO.md).
 
@@ -65,9 +71,9 @@ pip install -r requirements.txt
 cp .env.example .env
 # preenche o .env com os valores reais (token Sympla, webhook Bitrix, códigos de campo, Supabase)
 
-python setup_custom_fields.py     # garante que os campos/estágios existem no Bitrix
-python preview_novos_leads.py     # mostra o que aconteceria, sem escrever nada
-python automacao_a_inscricoes.py  # roda de verdade
+python -m scripts.setup_custom_fields     # garante que os campos/estágios existem no Bitrix
+python -m scripts.preview_novos_leads     # mostra o que aconteceria, sem escrever nada
+python -m scripts.automacao_a_inscricoes  # roda de verdade
 ```
 
 Pra rodar o painel administrativo localmente:
@@ -92,9 +98,9 @@ flask --app interface_app run --port 5002
 
 A idempotência (quem já foi processado) é guardada na tabela `participantes_processados` do Supabase — não em cache do GitHub Actions, ela é compartilhada com o painel, que também pode disparar sincronização sob demanda.
 
-A varredura de duplicados (`.github/workflows/verificar_duplicados.yml`) roda diariamente pelo mesmo mecanismo, precisando só de `SYMPLA_TOKEN`, `BITRIX_WEBHOOK_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`.
+A varredura de duplicados (`verificar_duplicados.yml`) roda diariamente, precisando só de `SYMPLA_TOKEN`, `BITRIX_WEBHOOK_URL`, `SUPABASE_URL`, `SUPABASE_SERVICE_KEY`. A sincronização da lista de eventos (`sincronizar_lista_convidados.yml`) também é diária e precisa só de `SYMPLA_TOKEN` e `BITRIX_WEBHOOK_URL`.
 
-**Painel administrativo** roda como um serviço web separado (`interface_app.py`). Hoje hospedado no Railway (usa `railpack.json` pra definir o comando de start, já que o builder não detecta sozinho qual dos scripts é o app), com `render.yaml` mantido como alternativa/histórico caso volte pro Render. Precisa dessas env vars:
+**Painel administrativo** roda como um serviço web separado (`interface_app.py`). Hoje hospedado no Railway (usa `railpack.json` pra definir o comando de start, já que o builder não detecta sozinho qual dos scripts é o app). Precisa dessas env vars:
 
 - `SYMPLA_TOKEN`
 - `BITRIX_WEBHOOK_URL`
@@ -105,6 +111,7 @@ A varredura de duplicados (`.github/workflows/verificar_duplicados.yml`) roda di
 - `BITRIX_FIELD_ORIGEM`
 - `BITRIX_FIELD_FILTRAR_EVENTO`
 - `BITRIX_FIELD_PRESENTE_NO_EVENTO`
+- `BITRIX_STAGE_POS_EVENTO`
 - `SUPABASE_URL`
 - `SUPABASE_SERVICE_KEY`
 - `ADMIN_PASSWORD`

@@ -115,8 +115,22 @@ def find_leads_by_evento_item(item_id: int) -> list[dict]:
     campo FIELD_PARENT_ID_EVENTO_SPA que services/lead_sync_service.py
     usa pra vincular na hora de criar/atualizar) — usado pelo funil de
     conversão da aba Inscritos (domain/funil_conversao.py). Traz só
-    ID/STATUS_ID, o suficiente pra classificar cada Lead num degrau."""
-    return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID"]})
+    ID/STATUS_ID (classificar cada Lead num degrau) e ASSIGNED_BY_ID (o
+    responsável, exibido na aba Inscritos)."""
+    return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID", "ASSIGNED_BY_ID"]})
+
+
+def get_lead_owners(lead_ids: list) -> dict[str, str]:
+    """{id_do_lead: ASSIGNED_BY_ID} direto pelo ID, em lotes. Cobre Leads
+    que a aba Inscritos conhece (participantes_processados) mas que não
+    estão vinculados ao item da SPA do evento (find_leads_by_evento_item)."""
+    owners: dict[str, str] = {}
+    ids = [str(i) for i in lead_ids]
+    for start in range(0, len(ids), 100):
+        lote = ids[start:start + 100]
+        for lead in bitrix_list_all("crm.lead.list", {"filter": {"ID": lote}, "select": ["ID", "ASSIGNED_BY_ID"]}):
+            owners[str(lead["ID"])] = str(lead.get("ASSIGNED_BY_ID") or "")
+    return owners
 
 
 def find_contact_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
@@ -246,7 +260,7 @@ def ensure_enum_value(field_code: str, value_text: str) -> str:
 
     Cacheia no mesmo _enum_id_cache que resolve_enum_id usa, então dentro
     de um run só bate na API uma vez por (campo, valor). Não cria o CAMPO
-    em si (isso é responsabilidade de setup_custom_fields.py) — só
+    em si (isso é responsabilidade de scripts/setup_custom_fields.py) — só
     adiciona itens à LIST de um campo que já existe.
     """
     cache_key = (field_code, value_text)
@@ -255,7 +269,7 @@ def ensure_enum_value(field_code: str, value_text: str) -> str:
 
     fields = bitrix_call("crm.lead.userfield.list", {"filter": {"FIELD_NAME": field_code}})
     if not fields:
-        raise ValueError(f"Campo {field_code} não existe — rode setup_custom_fields.py antes.")
+        raise ValueError(f"Campo {field_code} não existe — rode scripts/setup_custom_fields.py antes.")
     field = fields[0]
     current_items = field.get("LIST", [])
     for item in current_items:
@@ -305,3 +319,31 @@ def resolve_user_id_by_email(email: str) -> int:
     user_id = int(users[0]["ID"])
     _user_id_cache[email] = user_id
     return user_id
+
+
+_user_names_cache: tuple[dict[str, str], dict[str, str]] | None = None
+
+
+def get_user_names() -> tuple[dict[str, str], dict[str, str]]:
+    """({id_do_usuario: nome}, {email_minusculo: nome}) de todos os usuários
+    do Bitrix, numa única listagem paginada (cacheada em processo). Serve
+    pra mostrar o nome de um assessor a partir do ASSIGNED_BY_ID de um
+    Lead ou do e-mail guardado no mapa de cupons. Requer que o webhook
+    tenha permissão de usuários, como resolve_user_id_by_email."""
+    global _user_names_cache
+    if _user_names_cache is not None:
+        return _user_names_cache
+
+    names_by_id: dict[str, str] = {}
+    names_by_email: dict[str, str] = {}
+    for user in bitrix_list_all("user.get", {}):
+        name = f"{user.get('NAME') or ''} {user.get('LAST_NAME') or ''}".strip()
+        if not name:
+            continue
+        names_by_id[str(user["ID"])] = name
+        email = (user.get("EMAIL") or "").strip().lower()
+        if email:
+            names_by_email[email] = name
+
+    _user_names_cache = (names_by_id, names_by_email)
+    return _user_names_cache
