@@ -40,7 +40,7 @@ jobs:
           restore-keys: |
             sympla-processed-
 
-      - run: python automacao_a_inscricoes.py
+      - run: python -m scripts.automacao_a_inscricoes
         env:
           SYMPLA_TOKEN: ${{ secrets.SYMPLA_TOKEN }}
           BITRIX_WEBHOOK_URL: ${{ secrets.BITRIX_WEBHOOK_URL }}

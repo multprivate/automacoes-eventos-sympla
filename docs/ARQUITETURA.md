@@ -11,7 +11,7 @@ O código deixou de ser um punhado de scripts soltos e passou a ter responsabili
 - **`services/`**: orquestração. `lead_sync_service.py` é o motor de verdade (`sync_all_upcoming_events()`/`sync_one_event()`), usado tanto pelo Cron Job agendado quanto pelo painel. `coupon_service.py` e `config_service.py` resolvem cupom/campos consultando o Supabase, com fallback pro valor fixo se o banco cair.
 - **`repositories/`**: acesso ao Supabase via REST (PostgREST), um wrapper fino por tabela — sem SDK adicional, mesmo espírito do `bitrix_client.py`.
 - **`interface/`**: o painel administrativo (Dashboard/Eventos/Mapeamento/Cupons/Logs/Verificação de Duplicados), um processo Flask próprio.
-- **`automacao_a_inscricoes.py`**: virou um wrapper de CLI fino, só lê `TEST_EVENT_IDS` e chama `lead_sync_service.sync_all_upcoming_events()`.
+- **`scripts/`**: CLIs finos chamados pelo GitHub Actions (`python -m scripts.<nome>`). `automacao_a_inscricoes` só lê `TEST_EVENT_IDS` e chama `lead_sync_service.sync_all_upcoming_events()`.
 
 ## Tabelas no Supabase
 

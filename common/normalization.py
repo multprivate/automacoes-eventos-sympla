@@ -139,8 +139,8 @@ def format_event_label(event_name: str, event_date: str) -> str:
     circula no código, resultado de (event.get("start_date") or "")[:10]).
 
     Função pura — usada tanto na pré-população em massa
-    (setup_custom_fields.py, todos os eventos de get_all_events()) quanto
-    incremental em runtime (automacao_a_inscricoes.py, evento por evento),
+    (scripts/setup_custom_fields.py, todos os eventos de get_all_events()) quanto
+    incremental em runtime (scripts/automacao_a_inscricoes.py, evento por evento),
     pra garantir texto IDÊNTICO nos dois lugares: qualquer divergência de
     formatação cria um item duplicado na lista do Bitrix pro mesmo evento
     (ex: "04/03/26" vs "04/03/2026" viram duas entradas diferentes).

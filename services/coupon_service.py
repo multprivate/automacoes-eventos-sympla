@@ -5,7 +5,7 @@ Supabase não está configurado, está fora do ar, ou a tabela está vazia —
 a automação nunca trava por causa do painel de administração estar down.
 
 Mantém resolve_assessor_and_origem(cupom) com a mesma assinatura de
-sempre: automacao_a_inscricoes.py (e, por tabela, preview_novos_leads.py)
+sempre: scripts/automacao_a_inscricoes.py (e, por tabela, scripts/preview_novos_leads.py)
 continuam chamando exatamente como chamavam quando o mapa era só os dicts
 hardcoded.
 """

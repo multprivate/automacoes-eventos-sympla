@@ -33,7 +33,7 @@ Pelo painel (recomendado): aba **Cupons**, formulário "+ Novo cupom" — não p
 1. Confirma o e-mail certo do assessor no Bitrix.
 2. Preenche cupom (mesmo formato que a Sympla manda, tipo `"100.00% - IARA"`), tipo "Assessor", e o e-mail.
 3. Se for uma porcentagem diferente da que já existe pro mesmo assessor (por exemplo já tem `"100.00% - IARA"` e agora precisa de `"70% - IARA"`), cadastra como um cupom novo, não edita o existente.
-4. Testa com `preview_novos_leads.py` antes de confiar (veja a seção de teste abaixo) — ele já lê o cupom do Supabase.
+4. Testa com `scripts/preview_novos_leads.py` antes de confiar (veja a seção de teste abaixo) — ele já lê o cupom do Supabase.
 
 Cupom de canal, sem assessor específico (o exemplo hoje é tráfego pago), usa tipo "Canal de aquisição" no mesmo formulário.
 
@@ -43,10 +43,10 @@ Se o Supabase estiver fora do ar (raro), o mapa cai pros dicts fixos em `domain/
 
 Antes de confiar em qualquer mudança na lógica de matching, criação de Lead ou mapa de assessores, dois passos:
 
-**1. `preview_novos_leads.py`** mostra o que a automação faria em cada participante de cada evento, sem escrever nada no Bitrix. Roda contra os eventos de verdade, então é bom pra ver se o comportamento geral faz sentido, mas não cria dado nenhum.
+**1. `scripts/preview_novos_leads.py`** mostra o que a automação faria em cada participante de cada evento, sem escrever nada no Bitrix. Roda contra os eventos de verdade, então é bom pra ver se o comportamento geral faz sentido, mas não cria dado nenhum.
 
 ```bash
-python preview_novos_leads.py
+python -m scripts.preview_novos_leads
 ```
 
 **2. `TEST_EVENT_IDS`**, no `.env` local, restringe a Automação A (a de verdade, com escrita) a um evento específico. O jeito mais seguro de validar uma mudança de ponta a ponta é criar um evento de teste na Sympla (precisa estar publicado, rascunho não aparece pra API), cadastrar 1 ou 2 inscritos de teste nele, pegar o `event_id` interno (não o número que aparece no painel do organizador Sympla: use `resolve_event_id()`, de `common`, pra converter) e rodar assim:
@@ -55,14 +55,14 @@ python preview_novos_leads.py
 # no .env local
 TEST_EVENT_IDS=s35acb4
 
-python automacao_a_inscricoes.py
+python -m scripts.automacao_a_inscricoes
 ```
 
 Isso cria/atualiza Leads de verdade, mas só pros participantes desse evento. Depois de validar, limpa o `TEST_EVENT_IDS` do `.env` local (não precisa mexer em nada na produção, essa variável nunca deve ir pro GitHub Secrets).
 
 ## O painel administrativo
 
-Um Flask separado (`interface_app.py`, blueprints em `interface/`), rodando como serviço próprio (`sympla-dashboard` no `render.yaml`). Login por senha única (`ADMIN_PASSWORD`).
+Um Flask separado (`interface_app.py`, blueprints em `interface/`), rodando como serviço próprio (hospedado no Railway, start em `railpack.json`). Login por senha única (`ADMIN_PASSWORD`).
 
 - **Dashboard**: visão geral (eventos futuros/sincronizados, última execução).
 - **Eventos**: lista de eventos com contadores, e os botões "Sincronizar agora" (só participantes novos), "Forçar atualização de campos" (reenvia os campos de evento mesmo já iguais; se o evento já passou, também preenche "Presente no evento" e move os Leads pra "Pós Evento", exceto Ganho/Perdido), "Remover"/toggle Ativo-Inativo (pausa/exclui o evento da sincronização automática, sem apagar histórico).
@@ -77,7 +77,7 @@ Rodar local: `flask --app interface_app run --port 5002`.
 
 **Pelo painel** (mais direto): aba Logs mostra sucesso/erro por evento sincronizado, e o Dashboard mostra a última execução.
 
-**Pelo GitHub Actions** (enquanto o Cron Job do Render não substituiu o schedule — ver `docs/ARQUITETURA.md`): pra ver o histórico de execuções:
+**Pelo GitHub Actions** (ver `docs/ARQUITETURA.md`): pra ver o histórico de execuções:
 
 ```bash
 gh run list --workflow=automacao_a.yml --limit 15
@@ -97,7 +97,7 @@ Um log saudável mostra, pra cada evento, quantos inscritos novos apareceram e o
 O webhook de entrada do Bitrix não tem a permissão de usuários. Na tela do webhook (Aplicações → Webhooks → o webhook de entrada), em "Atribuir permissões", adiciona `Usuários (user)` ao lado de `CRM (crm)` e salva.
 
 **`Item 'X' não encontrado na lista do campo Y`**
-O valor não existe como opção no campo enumeration do Bitrix (Origem, Presente no evento). Roda `python setup_custom_fields.py`, ele confere os campos e adiciona os valores que faltarem sem apagar os que já existem. (Filtrar Evento não dá esse erro — ele cria o item sozinho em runtime via `ensure_enum_value`; se der erro é porque o CAMPO em si ainda não existe, aí sim precisa rodar `setup_custom_fields.py` primeiro.)
+O valor não existe como opção no campo enumeration do Bitrix (Origem, Presente no evento). Roda `python -m scripts.setup_custom_fields`, ele confere os campos e adiciona os valores que faltarem sem apagar os que já existem. (Filtrar Evento não dá esse erro — ele cria o item sozinho em runtime via `ensure_enum_value`; se der erro é porque o CAMPO em si ainda não existe, aí sim precisa rodar `scripts/setup_custom_fields.py` primeiro.)
 
 **Campo não bate / dado indo pro lugar errado**
 Confere se o código do campo no `.env` (ou no secret do GitHub) é o mesmo que está configurado de verdade no Bitrix. Códigos de campo mudam quando alguém recria ou renomeia o campo pela tela, e isso já aconteceu antes.
@@ -107,7 +107,7 @@ Provavelmente já existe um campo com esse `FIELD_NAME`, e o script tentou criar
 
 ## Serviço web do painel
 
-O plano free do Render (ou de qualquer outra hospedagem free-tier equivalente) dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). O serviço `sympla-dashboard` tem seu próprio `/health` (público, sem login, só confirma que o processo está de pé) — precisa de um ping externo (cron-job.org ou parecido) batendo nele periodicamente pra não dormir.
+Hospedagens free-tier dorme depois de um tempo sem tráfego (efeito colateral do free tier, não é bug nosso). O painel tem seu próprio `/health` (público, sem login, só confirma que o processo está de pé) — precisa de um ping externo (cron-job.org ou parecido) batendo nele periodicamente pra não dormir.
 
 Se o Dashboard/Logs demorar ~30-50s pra carregar na primeira visita do dia, é o cold start do free tier — confere se o ping em `/health` do `sympla-dashboard` está configurado e rodando.
 

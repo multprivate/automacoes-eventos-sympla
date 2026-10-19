@@ -60,7 +60,7 @@ def _run_sync(event_id: str, force: bool) -> None:
 
     Antes rodava tudo síncrono dentro da própria requisição — pra um evento
     grande com "Forçar campos" (reprocessa TODO mundo, não só quem é novo),
-    isso passava fácil de 1-2 minutos, e o proxy de borda da Railway/Render
+    isso passava fácil de 1-2 minutos, e o proxy de borda da Railway
     na frente do gunicorn desiste da conexão bem antes disso (o gunicorn
     tem --timeout 300, mas o proxy do provedor tem o dele próprio, fora do
     nosso controle — incidente real: "upstream error" no painel enquanto o

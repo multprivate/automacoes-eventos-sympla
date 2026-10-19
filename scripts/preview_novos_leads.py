@@ -13,7 +13,7 @@ TODO mundo, não só quem seria "novo") — é só pra validação manual, não
 precisa refletir o filtro de produção.
 
 Uso:
-    python preview_novos_leads.py
+    python -m scripts.preview_novos_leads
 """
 
 import logging

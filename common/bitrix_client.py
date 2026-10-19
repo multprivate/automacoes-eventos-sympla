@@ -246,7 +246,7 @@ def ensure_enum_value(field_code: str, value_text: str) -> str:
 
     Cacheia no mesmo _enum_id_cache que resolve_enum_id usa, então dentro
     de um run só bate na API uma vez por (campo, valor). Não cria o CAMPO
-    em si (isso é responsabilidade de setup_custom_fields.py) — só
+    em si (isso é responsabilidade de scripts/setup_custom_fields.py) — só
     adiciona itens à LIST de um campo que já existe.
     """
     cache_key = (field_code, value_text)
@@ -255,7 +255,7 @@ def ensure_enum_value(field_code: str, value_text: str) -> str:
 
     fields = bitrix_call("crm.lead.userfield.list", {"filter": {"FIELD_NAME": field_code}})
     if not fields:
-        raise ValueError(f"Campo {field_code} não existe — rode setup_custom_fields.py antes.")
+        raise ValueError(f"Campo {field_code} não existe — rode scripts/setup_custom_fields.py antes.")
     field = fields[0]
     current_items = field.get("LIST", [])
     for item in current_items:

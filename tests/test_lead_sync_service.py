@@ -574,7 +574,7 @@ class TestSyncOneEvent:
 
 class TestSyncAllUpcomingEventsLock:
     """A trava 'global' substitui o `concurrency: group: automacao-a` que o
-    GitHub Actions garantia sozinho — sem ela, o Cron Job Render (motor
+    GitHub Actions garantia sozinho — sem ela, o Cron Job externo (motor
     agendado) e o painel (sob demanda) poderiam sobrepor."""
 
     def test_trava_em_uso_pula_execucao_sem_erro(self, monkeypatch):
