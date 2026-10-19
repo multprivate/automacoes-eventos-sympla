@@ -1,27 +1,29 @@
 {% extends "base.html" %}
 {% block title %}Inscritos · {{ evento.nome }}{% endblock %}
+{% block body_class %}page-inscritos{% endblock %}
 {% block content %}
+{% set filtrando = q or status or etapa or assessor %}
 <p class="eyebrow">Sincronização</p>
 <h2>{{ evento.nome }}</h2>
 <p class="page-subtitle">
     {{ evento.data }} · <code>{{ evento.id }}</code> · {{ total_geral }} inscrito(s)
-    {%- if q or status or etapa or assessor %} · {{ total }} exibido(s) com o filtro atual{% endif %}
+    {%- if filtrando %} · {{ total }} exibido(s) com o filtro atual{% endif %}
 </p>
 
-<div class="grid">
-    <article><p>Inscritos</p><h4>{{ resumo.total }}</h4></article>
-    <article><p>Já eram clientes</p><h4>{{ resumo.clientes }}</h4></article>
-    <article>
-        <p>Taxa de presença</p>
-        <h4>{{ resumo.taxa_presenca_pct }}%</h4>
+<div class="stat-strip">
+    <div class="stat"><span class="stat-label">Inscritos</span><strong>{{ resumo.total }}</strong></div>
+    <div class="stat"><span class="stat-label">Já eram clientes</span><strong>{{ resumo.clientes }}</strong></div>
+    <div class="stat">
+        <span class="stat-label">Taxa de presença</span>
+        <strong>{{ resumo.taxa_presenca_pct }}%</strong>
         <small>{{ resumo.presentes }} de {{ resumo.total }} fizeram check-in</small>
-    </article>
-    <article><p>Não verificados</p><h4>{{ resumo.nao_verificados }}</h4></article>
+    </div>
+    <div class="stat"><span class="stat-label">Não verificados</span><strong>{{ resumo.nao_verificados }}</strong></div>
 </div>
 
 <h3>Funil de Conversão</h3>
 {% if funil_barras %}
-<div class="funil">
+<div class="funil funil-horizontal">
     {% for b in funil_barras %}
     <div class="funil-etapa">
         <div class="funil-rotulo"><span>{{ b.rotulo }}</span><strong>{{ b.valor }}</strong></div>
@@ -29,36 +31,36 @@
     </div>
     {% endfor %}
 </div>
-<p class="page-subtitle mt-lg">
+<p class="page-subtitle">
     <small>{{ funil.perdido }} perdido(s) (Lead Perdido) · {{ funil.fora_do_funil }} vinculado(s) fora do funil novo. Não contam nos degraus acima.</small>
 </p>
 {% if funil.total != total_geral %}
-<p class="page-subtitle">
-    <small>⚠ O Bitrix tem {{ funil.total }} Lead(s) vinculado(s) a este evento, mas {{ total_geral }} inscrito(s) atualmente na Sympla: a diferença normalmente vem de Leads duplicados (achado conhecido, ainda não corrigido na origem) ou de inscrições canceladas na Sympla depois de já terem gerado um Lead. Os números do funil acima refletem o Bitrix, não necessariamente 1 Lead por inscrito atual.</small>
-</p>
+<details class="funil-aviso">
+    <summary>⚠ O Bitrix tem {{ funil.total }} Lead(s) vinculado(s), a Sympla tem {{ total_geral }} inscrito(s). Por que os números diferem?</summary>
+    <p><small>A diferença normalmente vem de Leads duplicados (achado conhecido, ainda não corrigido na origem) ou de inscrições canceladas na Sympla depois de já terem gerado um Lead. Os números do funil refletem o Bitrix, não necessariamente 1 Lead por inscrito atual.</small></p>
+</details>
 {% endif %}
 {% else %}
 <p class="page-subtitle">Sem dados do funil ainda: evento ainda não vinculado à SPA "Eventos Sympla" no Bitrix (sincronize o evento pelo menos uma vez), ou falha ao consultar o Bitrix agora.</p>
 {% endif %}
 
 <h3>Inscritos</h3>
+<div class="filtro-chips" role="group" aria-label="Filtrar por status">
+    {% for valor, rotulo, qtd in [("", "Todos", resumo.total), ("cliente", "Clientes", resumo.clientes), ("prospect", "Prospects", resumo.prospects), ("nao_verificado", "Não verificados", resumo.nao_verificados)] %}
+    <a class="chip {{ 'chip-ativo' if status == valor }}" {{ 'aria-current="true"' if status == valor }}
+       href="{{ url_for('eventos.inscritos', event_id=evento.id, q=q, status=valor, etapa=etapa, assessor=assessor) }}">{{ rotulo }} <span class="chip-qtd">{{ qtd }}</span></a>
+    {% endfor %}
+</div>
+
 <form method="get" class="filtro-inscritos">
-    <div class="filtro-campo">
+    <input type="hidden" name="status" value="{{ status }}">
+    <div class="filtro-campo filtro-busca">
         <label for="q">Buscar por nome ou e-mail</label>
         <input type="text" id="q" name="q" value="{{ q }}" placeholder="ex: Karine">
     </div>
     <div class="filtro-campo">
-        <label for="status">Status</label>
-        <select id="status" name="status">
-            <option value="" {{ "selected" if not status }}>Todos</option>
-            <option value="cliente" {{ "selected" if status == "cliente" }}>Cliente</option>
-            <option value="prospect" {{ "selected" if status == "prospect" }}>Prospect</option>
-            <option value="nao_verificado" {{ "selected" if status == "nao_verificado" }}>Não verificado</option>
-        </select>
-    </div>
-    <div class="filtro-campo">
         <label for="etapa">Etapa do Lead</label>
-        <select id="etapa" name="etapa">
+        <select id="etapa" name="etapa" onchange="this.form.requestSubmit()">
             <option value="" {{ "selected" if not etapa }}>Todas</option>
             {% for chave, rotulo in etapa_rotulos.items() %}
             <option value="{{ chave }}" {{ "selected" if etapa == chave }}>{{ rotulo }}</option>
@@ -67,7 +69,7 @@
     </div>
     <div class="filtro-campo">
         <label for="assessor">Assessor</label>
-        <select id="assessor" name="assessor">
+        <select id="assessor" name="assessor" onchange="this.form.requestSubmit()">
             <option value="" {{ "selected" if not assessor }}>Todos</option>
             <option value="{{ sem_assessor }}" {{ "selected" if assessor == sem_assessor }}>Sem assessor</option>
             {% for nome in assessores %}
@@ -75,72 +77,74 @@
             {% endfor %}
         </select>
     </div>
-    <button type="submit" class="secondary">Filtrar</button>
-    {% if q or status or etapa or assessor %}<a class="link-arrow" href="{{ url_for('eventos.inscritos', event_id=evento.id) }}">Limpar filtro</a>{% endif %}
-    <a class="link-arrow" href="{{ url_for('eventos.exportar_inscritos_csv', event_id=evento.id, q=q, status=status, etapa=etapa, assessor=assessor) }}">Exportar CSV →</a>
+    <button type="submit" class="secondary">Buscar</button>
+    {% if filtrando %}<a class="link-arrow" href="{{ url_for('eventos.inscritos', event_id=evento.id) }}">Limpar filtros</a>{% endif %}
+    <a class="link-arrow filtro-export" href="{{ url_for('eventos.exportar_inscritos_csv', event_id=evento.id, q=q, status=status, etapa=etapa, assessor=assessor) }}">Exportar CSV →</a>
 </form>
 
 <div class="table-wrap">
 <table class="inscritos-table">
     <thead>
         <tr>
-            <th>Inscrito</th><th>Contato</th><th>Cliente</th><th>Match</th>
-            <th>Encontrado em</th><th>Check-in</th><th>Bitrix</th><th>Etapa do Lead</th><th>Cupom</th><th>Responsável (Bitrix)</th><th>Ações</th>
+            <th>Inscrito</th><th>Cupom e responsável</th><th>Situação</th><th>Lead</th><th>Histórico</th><th>Ações</th>
         </tr>
     </thead>
     <tbody>
         {% for l in linhas %}
         <tr>
-            <td>{{ l.nome }}<br><code>{{ l.participant_id }}</code></td>
-            <td>{{ l.email }}<br><small>{{ l.telefone }} · {{ l.cpf }}</small></td>
-            <td>
-                {% if l.status == "cliente" %}
-                <span class="badge badge-ok">cliente</span>
-                {% elif l.status == "prospect" %}
-                <span class="badge badge-neutral">prospect</span>
-                {% else %}
-                <small>não verificado</small>
-                {% endif %}
+            <td data-label="Inscrito">
+                <strong class="inscrito-nome">{{ l.nome }}</strong>
+                <span class="linha-sec">{{ l.email }}</span>
+                <span class="linha-sec">{{ l.telefone }}{% if l.cpf %} · {{ l.cpf }}{% endif %}</span>
+                <code class="id-mini">{{ l.participant_id }}</code>
             </td>
-            <td>{% if l.match_method %}<code>{{ l.match_method }}</code>{% else %}–{% endif %}</td>
-            <td>
-                {{ l.processado_em | brt if l.processado_em else "–" }}
-                {% if l.verificado_em and l.verificado_em != l.processado_em %}
-                <br><small>verificado {{ l.verificado_em | brt }}</small>
-                {% endif %}
+            <td data-label="Cupom e responsável">
+                {% if l.cupom %}<code class="cupom" title="{{ l.cupom }}">{{ l.cupom }}</code>{% else %}<span class="linha-sec">sem cupom</span>{% endif %}
+                <span class="linha-sec">Resp.: {{ l.responsavel_bitrix or "–" }}</span>
             </td>
-            <td>
-                {% if l.checkin %}<span class="badge badge-ok">presente</span>{% else %}<span class="badge badge-neutral">faltou</span>{% endif %}
+            <td data-label="Situação">
+                <div class="badges-linha">
+                    {% if l.status == "cliente" %}
+                    <span class="badge badge-ok">cliente</span>
+                    {% elif l.status == "prospect" %}
+                    <span class="badge badge-neutral">prospect</span>
+                    {% else %}
+                    <span class="badge badge-neutral">não verificado</span>
+                    {% endif %}
+                    {% if l.checkin %}<span class="badge badge-ok">presente</span>{% else %}<span class="badge badge-neutral">faltou</span>{% endif %}
+                </div>
+                <span class="linha-sec">match: {% if l.match_method %}<code>{{ l.match_method }}</code>{% else %}–{% endif %}</span>
             </td>
-            <td>
-                {% if l.lead_url %}<a href="{{ l.lead_url }}" target="_blank" rel="noopener">Lead #{{ l.lead_id }}</a><br>{% endif %}
-                {% if l.contact_url %}<a href="{{ l.contact_url }}" target="_blank" rel="noopener">Contato #{{ l.contact_id }}</a>{% endif %}
+            <td data-label="Lead">
+                <div class="links-bitrix">
+                    {% if l.lead_url %}<a href="{{ l.lead_url }}" target="_blank" rel="noopener">Lead #{{ l.lead_id }}</a>{% endif %}
+                    {% if l.contact_url %}<a href="{{ l.contact_url }}" target="_blank" rel="noopener">Contato #{{ l.contact_id }}</a>{% endif %}
+                    {% if not l.lead_url and not l.contact_url %}–{% endif %}
+                </div>
                 {% if l.tem_duplicado %}
-                <br><span class="badge badge-warning" title="Contatos {{ l.contact_ids_duplicados }} bateram com este inscrito (duplicata pré-existente no Bitrix, não criada pela automação). O de menor ID (#{{ l.contact_id }}) foi o usado. Mesclar Contatos é uma tarefa manual. Este painel só sinaliza.">{{ l.contact_ids_duplicados|length }} contatos duplicados</span>
+                <span class="badge badge-warning" title="Contatos {{ l.contact_ids_duplicados }} bateram com este inscrito (duplicata pré-existente no Bitrix, não criada pela automação). O de menor ID (#{{ l.contact_id }}) foi o usado. Mesclar Contatos é uma tarefa manual. Este painel só sinaliza.">{{ l.contact_ids_duplicados|length }} contatos duplicados</span>
+                {% endif %}
+                <span class="linha-sec">{{ l.etapa_rotulo or "sem etapa" }}</span>
+            </td>
+            <td data-label="Histórico" class="historico">
+                <span class="linha-sec">Encontrado {{ l.processado_em | brt if l.processado_em else "–" }}</span>
+                {% if l.verificado_em and l.verificado_em != l.processado_em %}
+                <span class="linha-sec">Verificado {{ l.verificado_em | brt }}</span>
                 {% endif %}
             </td>
-            <td>
-                {% if l.etapa_rotulo %}<small>{{ l.etapa_rotulo }}</small>{% else %}–{% endif %}
-            </td>
-            <td>{% if l.cupom %}<code>{{ l.cupom }}</code>{% else %}–{% endif %}</td>
-            <td>{{ l.responsavel_bitrix or "–" }}</td>
-            <td>
-                <div class="actions-stack">
-                <div class="actions-row">
-                    <form method="post" action="{{ url_for('eventos.reprocessar_inscrito', event_id=evento.id, participant_id=l.participant_id) }}">
-                        <input type="hidden" name="page" value="{{ page }}">
-                        <input type="hidden" name="q" value="{{ q }}">
-                        <input type="hidden" name="status" value="{{ status }}">
-                        <input type="hidden" name="etapa" value="{{ etapa }}">
-                        <input type="hidden" name="assessor" value="{{ assessor }}">
-                        <button type="submit" class="secondary" title="Refaz o match deste inscrito (CPF → telefone → e-mail → nome) e atualiza o card no Bitrix. Não reenvia campos que já estão certos nem move o Lead de estágio.">Reprocessar</button>
-                    </form>
-                </div>
-                </div>
+            <td data-label="Ações">
+                <form method="post" action="{{ url_for('eventos.reprocessar_inscrito', event_id=evento.id, participant_id=l.participant_id) }}">
+                    <input type="hidden" name="page" value="{{ page }}">
+                    <input type="hidden" name="q" value="{{ q }}">
+                    <input type="hidden" name="status" value="{{ status }}">
+                    <input type="hidden" name="etapa" value="{{ etapa }}">
+                    <input type="hidden" name="assessor" value="{{ assessor }}">
+                    <button type="submit" class="secondary btn-sm" title="Refaz o match deste inscrito (CPF → telefone → e-mail → nome) e atualiza o card no Bitrix. Não reenvia campos que já estão certos nem move o Lead de estágio.">Reprocessar</button>
+                </form>
             </td>
         </tr>
         {% else %}
-        <tr><td colspan="11">Nenhum inscrito encontrado.</td></tr>
+        <tr><td colspan="6">Nenhum inscrito encontrado.</td></tr>
         {% endfor %}
     </tbody>
 </table>

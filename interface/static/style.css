@@ -246,13 +246,92 @@ tbody tr td[colspan] { color: var(--color-text-muted); text-align: center; paddi
 td a { color: var(--color-primary); font-weight: 600; text-decoration: none; }
 td a:hover { text-decoration: underline; }
 
-/* Aba Inscritos: nome de inscrito ocasionalmente vem muito longo da
-   Sympla (dado do próprio formulário, não normalizado) — sem limite,
-   engorda a coluna e deixa a linha inteira desproporcional. Palavras do
-   nome já quebram sozinhas nos espaços dentro do max-width; o id em
-   <code> é protegido de quebrar no meio dos dígitos (nowrap). */
-.inscritos-table td:first-child { max-width: 220px; }
-.inscritos-table td:first-child code { white-space: nowrap; }
+/* Aba Inscritos ------------------------------------------------------------
+   Tela mais larga que o resto do painel (a tabela agrupa campos em 6
+   colunas pra caber sem rolagem horizontal). Regras escopadas em
+   .inscritos-table/body.page-inscritos: as tabelas das outras telas não
+   mudam. */
+body.page-inscritos main.container { max-width: 1440px; }
+body.page-inscritos .appbar-inner { max-width: 1440px; }
+
+.stat-strip {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(190px, 1fr));
+    gap: .75rem;
+    margin-bottom: 1.75rem;
+}
+.stat {
+    background: var(--color-surface);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius);
+    padding: .75rem 1rem;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: baseline;
+    gap: .15rem .6rem;
+}
+.stat-label { flex: 1 0 100%; font-size: .7rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em; color: var(--color-text-muted); }
+.stat strong { font-size: 1.5rem; font-weight: 800; letter-spacing: -.02em; font-variant-numeric: tabular-nums; }
+
+.funil-horizontal { flex-direction: row; gap: 1.25rem; margin-bottom: .75rem; }
+.funil-horizontal .funil-etapa { flex: 1 1 0; min-width: 0; }
+.funil-aviso { margin-bottom: 1.25rem; font-size: .85rem; color: var(--color-warning); }
+.funil-aviso summary { cursor: pointer; }
+.funil-aviso p { margin: .5rem 0 0; max-width: 80ch; }
+
+.filtro-chips { display: flex; flex-wrap: wrap; gap: .5rem; margin-bottom: .9rem; }
+.chip {
+    display: inline-flex; align-items: center; gap: .45rem;
+    padding: .35rem .8rem;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-pill);
+    background: var(--color-surface);
+    color: var(--color-text);
+    font-size: .82rem; font-weight: 600; text-decoration: none;
+}
+.chip:hover { background: var(--color-neutral-bg); text-decoration: none; }
+.chip-ativo { background: var(--color-primary); border-color: var(--color-primary); color: #fff; }
+.chip-ativo:hover { background: var(--color-primary-hover); }
+.chip-qtd { font-variant-numeric: tabular-nums; opacity: .75; font-weight: 700; }
+.filtro-busca input[type=text] { max-width: 320px; min-width: 220px; }
+.filtro-export { margin-left: auto; }
+
+/* Cabeçalho fixo logo abaixo da barra superior (também sticky). overflow:
+   clip (e não hidden/auto) mantém os cantos arredondados sem criar um
+   contêiner de rolagem, que quebraria o sticky. */
+body.page-inscritos .table-wrap { overflow: clip; }
+.inscritos-table thead th { position: sticky; top: 3.7rem; z-index: 5; background: var(--color-surface); }
+.inscritos-table tbody td { padding: .65rem 1rem; vertical-align: top; }
+.inscritos-table td > * { display: block; }
+.inscritos-table td > .badges-linha, .inscritos-table td > .links-bitrix { display: flex; }
+.inscritos-table td > * + * { margin-top: .2rem; }
+.inscrito-nome { font-weight: 700; overflow-wrap: anywhere; }
+.linha-sec { font-size: .8rem; color: var(--color-text-muted); overflow-wrap: anywhere; }
+.id-mini { font-size: .68rem; white-space: nowrap; width: fit-content; }
+.cupom { white-space: nowrap; width: fit-content; max-width: 100%; overflow: hidden; text-overflow: ellipsis; }
+.badges-linha, .links-bitrix { flex-wrap: wrap; gap: .35rem .6rem; align-items: center; }
+.historico { white-space: nowrap; font-variant-numeric: tabular-nums; }
+.btn-sm { padding: .35rem .7rem; font-size: .78rem; box-shadow: none; }
+
+@media (max-width: 900px) {
+    .funil-horizontal { flex-direction: column; }
+    .filtro-export { margin-left: 0; }
+    .inscritos-table thead { display: none; }
+    .inscritos-table, .inscritos-table tbody, .inscritos-table tr, .inscritos-table td { display: block; width: 100%; }
+    .inscritos-table tbody tr { padding: .75rem 0; border-bottom: 1px solid var(--color-border-strong); }
+    .inscritos-table tbody td { border-bottom: none; padding: .3rem 1.25rem; }
+    .inscritos-table td::before {
+        content: attr(data-label);
+        display: block;
+        font-size: .65rem; font-weight: 700; text-transform: uppercase; letter-spacing: .08em;
+        color: var(--color-text-muted);
+        margin-bottom: .15rem;
+    }
+    .inscritos-table td[colspan]::before { content: none; }
+    .historico { white-space: normal; }
+}
+
+code { white-space: nowrap; }
 
 code {
     background: var(--color-neutral-bg);

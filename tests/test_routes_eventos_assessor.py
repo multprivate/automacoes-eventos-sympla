@@ -98,7 +98,7 @@ def test_pagina_inscritos_renderiza_colunas_e_filtra_por_assessor(monkeypatch):
         sessao["admin_logado"] = True
 
     todos = client.get("/eventos/evt/inscritos").get_data(as_text=True)
-    assert ">Cupom<" in todos and "100.00% - BRUNA" in todos and "Responsável (Bitrix)" in todos
+    assert "Cupom e responsável" in todos and "100.00% - BRUNA" in todos and "Resp.: –" in todos
     assert "Pessoa1 Teste" in todos and "Pessoa2 Teste" in todos
 
     filtrado = client.get("/eventos/evt/inscritos?assessor=Bruna Tassia").get_data(as_text=True)
