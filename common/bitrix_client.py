@@ -120,6 +120,19 @@ def find_leads_by_evento_item(item_id: int) -> list[dict]:
     return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID", "ASSIGNED_BY_ID"]})
 
 
+def get_lead_owners(lead_ids: list) -> dict[str, str]:
+    """{id_do_lead: ASSIGNED_BY_ID} direto pelo ID, em lotes. Cobre Leads
+    que a aba Inscritos conhece (participantes_processados) mas que não
+    estão vinculados ao item da SPA do evento (find_leads_by_evento_item)."""
+    owners: dict[str, str] = {}
+    ids = [str(i) for i in lead_ids]
+    for start in range(0, len(ids), 100):
+        lote = ids[start:start + 100]
+        for lead in bitrix_list_all("crm.lead.list", {"filter": {"ID": lote}, "select": ["ID", "ASSIGNED_BY_ID"]}):
+            owners[str(lead["ID"])] = str(lead.get("ASSIGNED_BY_ID") or "")
+    return owners
+
+
 def find_contact_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
     return _find_ids_by_cpf("crm.contact.list", cpf_digits, field_code)
 

@@ -13,7 +13,7 @@ import threading
 
 from flask import Blueprint, Response, flash, redirect, render_template, request, url_for
 
-from common import extract_discount_code, find_leads_by_evento_item, get_sympla_all_participants, get_user_names, spa_find_item_by_sympla_event_id
+from common import extract_discount_code, find_leads_by_evento_item, get_lead_owners, get_sympla_all_participants, get_user_names, spa_find_item_by_sympla_event_id
 from domain.funil_conversao import classificar_lead, resumo_funil
 from repositories import eventos_config_repo, processed_repo
 from repositories.sync_locks_repo import SyncLockHeld, acquire_lock, release_lock
@@ -160,9 +160,20 @@ def _preencher_assessores(event_id: str, participants: list[dict], linhas: list[
         log.warning("Falha ao listar usuários do Bitrix (assessores de %s): %s", event_id, exc)
         return
 
+    # Leads que o processamento achou mas que não estão vinculados ao item
+    # da SPA do evento não vêm na lista do funil: busca o dono direto.
+    faltando = [l["lead_id"] for l in linhas if l["lead_id"] and str(l["lead_id"]) not in responsavel_by_lead_id]
+    if faltando:
+        try:
+            responsavel_by_lead_id = {**responsavel_by_lead_id, **get_lead_owners(faltando)}
+        except Exception as exc:
+            log.warning("Falha ao buscar responsável de Leads fora do funil de %s: %s", event_id, exc)
+
     for linha in linhas:
         lead_id = str(linha["lead_id"]) if linha["lead_id"] else ""
-        linha["responsavel_bitrix"] = nomes_por_id.get(responsavel_by_lead_id.get(lead_id, ""))
+        user_id = responsavel_by_lead_id.get(lead_id, "")
+        if user_id:
+            linha["responsavel_bitrix"] = nomes_por_id.get(user_id) or f"Usuário #{user_id}"
 
     try:
         assessor_por_cupom, _ = load_coupon_maps()

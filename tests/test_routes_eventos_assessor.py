@@ -35,10 +35,24 @@ def test_preenche_assessor_do_cupom_e_responsavel_do_lead(monkeypatch):
     participantes = [_participante("1", "100.00% - BRUNA"), _participante("2"), _participante("3", "CUPOM-DESCONHECIDO")]
     linhas = _linhas(10, None, 12)
 
+    monkeypatch.setattr(routes_eventos, "get_lead_owners", lambda ids: {})
+
     routes_eventos._preencher_assessores("evt", participantes, linhas, {"10": "7", "12": "999"})
 
     assert [l["assessor_cupom"] for l in linhas] == ["Bruna Tassia", None, None]
-    assert [l["responsavel_bitrix"] for l in linhas] == ["Bruna Tassia", None, None]
+    assert [l["responsavel_bitrix"] for l in linhas] == ["Bruna Tassia", None, "Usuário #999"]
+
+
+def test_lead_fora_do_funil_tem_responsavel_buscado_direto_pelo_id(monkeypatch):
+    _patch_usuarios(monkeypatch)
+    pedidos = []
+    monkeypatch.setattr(routes_eventos, "get_lead_owners", lambda ids: pedidos.append(list(ids)) or {"98154": "7"})
+    linhas = _linhas(98154)
+
+    routes_eventos._preencher_assessores("evt", [_participante("1")], linhas, {})
+
+    assert pedidos == [[98154]]
+    assert linhas[0]["responsavel_bitrix"] == "Bruna Tassia"
 
 
 def test_falha_ao_listar_usuarios_do_bitrix_deixa_colunas_vazias(monkeypatch):
