@@ -9,7 +9,7 @@ Puro, sem I/O, mesmo espírito de eventos_helper.py — quem busca os dados
 (Sympla + Supabase) é a rota; este módulo só decide como exibi-los.
 """
 
-from common import extract_cpf, extract_phone, format_phone_br, participant_full_name
+from common import extract_cpf, extract_phone, format_phone_br, normalize_cupom, participant_full_name
 
 
 def build_inscritos_view(participants: list[dict], resultados: dict[str, dict]) -> list[dict]:
@@ -48,8 +48,36 @@ def build_inscritos_view(participants: list[dict], resultados: dict[str, dict]) 
             "lead_id": (resultado or {}).get("bitrix_lead_id"),
             "contact_ids_duplicados": contact_ids_duplicados,
             "tem_duplicado": bool(contact_ids_duplicados),
+            "assessor_cupom": None,
+            "responsavel_bitrix": None,
         })
     return linhas
+
+
+SEM_ASSESSOR = "__sem__"
+
+
+def resolver_assessor_do_cupom(
+    cupom: str,
+    assessor_por_cupom: dict[str, str],
+    nomes_por_email: dict[str, str],
+) -> str | None:
+    """Nome do assessor dono do cupom, ou None (sem cupom, cupom não
+    mapeado, cupom de canal ou e-mail sem usuário no Bitrix). Mesma chave
+    (trim+upper) que domain/coupons.py::resolve_assessor_and_origem."""
+    if not cupom:
+        return None
+    email = assessor_por_cupom.get(normalize_cupom(cupom))
+    if not email:
+        return None
+    return nomes_por_email.get(email.strip().lower())
+
+
+def listar_assessores(linhas: list[dict]) -> list[str]:
+    """Nomes distintos (cupom ou responsável do Bitrix), em ordem alfabética,
+    pro select de filtro."""
+    nomes = {l[campo] for l in linhas for campo in ("assessor_cupom", "responsavel_bitrix") if l.get(campo)}
+    return sorted(nomes, key=str.casefold)
 
 
 FUNIL_ETAPAS = [
@@ -76,7 +104,7 @@ def montar_funil_barras(funil: dict | None) -> list[dict] | None:
     ]
 
 
-def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str = "") -> list[dict]:
+def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str = "", assessor: str = "") -> list[dict]:
     """Filtro server-side pra aba Inscritos — `q` casa substring (sem
     diferenciar maiúsculas) em nome OU e-mail; `status` casa exato contra
     "cliente"/"prospect"/"nao_verificado" (calculado em build_inscritos_view,
@@ -86,7 +114,9 @@ def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str 
     ATUAL no Bitrix — "inscrito"/"pos_evento"/"reuniao"/"convertido"/
     "perdido"/"fora_do_funil"). status e etapa são independentes: um
     inscrito pode ser "cliente" (bateu com um Contato) e o Lead dele estar
-    em qualquer etapa do funil.
+    em qualquer etapa do funil. `assessor` casa exato contra o assessor do
+    cupom OU o responsável do Lead no Bitrix; SEM_ASSESSOR casa quem não
+    tem nenhum dos dois.
 
     Todos em branco = não filtra nada. Aplicado só na LISTAGEM — o
     resumo/funil da tela continuam calculados sobre o evento inteiro
@@ -100,6 +130,10 @@ def filter_linhas(linhas: list[dict], q: str = "", status: str = "", etapa: str 
         resultado = [l for l in resultado if l["status"] == status]
     if etapa:
         resultado = [l for l in resultado if l["etapa_bucket"] == etapa]
+    if assessor == SEM_ASSESSOR:
+        resultado = [l for l in resultado if not l["assessor_cupom"] and not l["responsavel_bitrix"]]
+    elif assessor:
+        resultado = [l for l in resultado if assessor in (l["assessor_cupom"], l["responsavel_bitrix"])]
     return resultado
 
 

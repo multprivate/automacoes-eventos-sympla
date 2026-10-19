@@ -115,8 +115,9 @@ def find_leads_by_evento_item(item_id: int) -> list[dict]:
     campo FIELD_PARENT_ID_EVENTO_SPA que services/lead_sync_service.py
     usa pra vincular na hora de criar/atualizar) — usado pelo funil de
     conversão da aba Inscritos (domain/funil_conversao.py). Traz só
-    ID/STATUS_ID, o suficiente pra classificar cada Lead num degrau."""
-    return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID"]})
+    ID/STATUS_ID (classificar cada Lead num degrau) e ASSIGNED_BY_ID (o
+    responsável, exibido na aba Inscritos)."""
+    return bitrix_list_all("crm.lead.list", {"filter": {FIELD_PARENT_ID_EVENTO_SPA: item_id}, "select": ["ID", "STATUS_ID", "ASSIGNED_BY_ID"]})
 
 
 def find_contact_ids_by_cpf(cpf_digits: str, field_code: str) -> list[int]:
@@ -305,3 +306,31 @@ def resolve_user_id_by_email(email: str) -> int:
     user_id = int(users[0]["ID"])
     _user_id_cache[email] = user_id
     return user_id
+
+
+_user_names_cache: tuple[dict[str, str], dict[str, str]] | None = None
+
+
+def get_user_names() -> tuple[dict[str, str], dict[str, str]]:
+    """({id_do_usuario: nome}, {email_minusculo: nome}) de todos os usuários
+    do Bitrix, numa única listagem paginada (cacheada em processo). Serve
+    pra mostrar o nome de um assessor a partir do ASSIGNED_BY_ID de um
+    Lead ou do e-mail guardado no mapa de cupons. Requer que o webhook
+    tenha permissão de usuários, como resolve_user_id_by_email."""
+    global _user_names_cache
+    if _user_names_cache is not None:
+        return _user_names_cache
+
+    names_by_id: dict[str, str] = {}
+    names_by_email: dict[str, str] = {}
+    for user in bitrix_list_all("user.get", {}):
+        name = f"{user.get('NAME') or ''} {user.get('LAST_NAME') or ''}".strip()
+        if not name:
+            continue
+        names_by_id[str(user["ID"])] = name
+        email = (user.get("EMAIL") or "").strip().lower()
+        if email:
+            names_by_email[email] = name
+
+    _user_names_cache = (names_by_id, names_by_email)
+    return _user_names_cache

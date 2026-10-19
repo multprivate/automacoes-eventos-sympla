@@ -86,3 +86,26 @@ def test_ja_na_ordem_certa_produz_payload_identico_em_valor_e_id():
     ]
     resultado = merge_enum_items_sorted(current, ["A", "B"])
     assert [(r["VALUE"], r.get("ID")) for r in resultado] == [("A", "1"), ("B", "2")]
+
+def test_get_user_names_monta_mapas_por_id_e_email_e_cacheia(monkeypatch):
+    from common import bitrix_client
+
+    chamadas = []
+
+    def fake_list_all(method, payload):
+        chamadas.append(method)
+        return [
+            {"ID": "7", "NAME": "Bruna", "LAST_NAME": "Tassia", "EMAIL": "Bruna.Tassia@x.com"},
+            {"ID": "8", "NAME": "", "LAST_NAME": "", "EMAIL": "sem@nome.com"},
+        ]
+
+    monkeypatch.setattr(bitrix_client, "_user_names_cache", None)
+    monkeypatch.setattr(bitrix_client, "bitrix_list_all", fake_list_all)
+
+    por_id, por_email = bitrix_client.get_user_names()
+    bitrix_client.get_user_names()
+
+    assert por_id == {"7": "Bruna Tassia"}
+    assert por_email == {"bruna.tassia@x.com": "Bruna Tassia"}
+    assert chamadas == ["user.get"]
+

@@ -1,4 +1,12 @@
-from interface.inscritos_helper import build_inscritos_view, filter_linhas, montar_funil_barras, resumo_conversao
+from interface.inscritos_helper import (
+    SEM_ASSESSOR,
+    build_inscritos_view,
+    filter_linhas,
+    listar_assessores,
+    montar_funil_barras,
+    resolver_assessor_do_cupom,
+    resumo_conversao,
+)
 
 
 def _participant(pid: str, nome="Fulano Teste", email="fulano@example.com", checked_in=False) -> dict:
@@ -158,3 +166,39 @@ class TestResumoConversao:
     def test_sem_inscrito_nenhum_nao_divide_por_zero(self):
         resumo = resumo_conversao([])
         assert resumo == {"total": 0, "clientes": 0, "prospects": 0, "nao_verificados": 0, "presentes": 0, "taxa_presenca_pct": 0}
+
+class TestAssessor:
+    def _linhas(self):
+        return [
+            {"nome": "A", "assessor_cupom": "Bruna Tassia", "responsavel_bitrix": "Iara Araujo"},
+            {"nome": "B", "assessor_cupom": None, "responsavel_bitrix": "Bruna Tassia"},
+            {"nome": "C", "assessor_cupom": None, "responsavel_bitrix": None},
+        ]
+
+    def test_filtra_por_assessor_em_qualquer_das_duas_colunas(self):
+        resultado = filter_linhas(self._linhas(), assessor="Bruna Tassia")
+        assert [l["nome"] for l in resultado] == ["A", "B"]
+
+    def test_filtra_sem_assessor(self):
+        resultado = filter_linhas(self._linhas(), assessor=SEM_ASSESSOR)
+        assert [l["nome"] for l in resultado] == ["C"]
+
+    def test_lista_assessores_distintos_e_ordenados(self):
+        assert listar_assessores(self._linhas()) == ["Bruna Tassia", "Iara Araujo"]
+
+    def test_view_inicializa_colunas_de_assessor_vazias(self):
+        linha = build_inscritos_view([_participant("1")], {})[0]
+        assert linha["assessor_cupom"] is None and linha["responsavel_bitrix"] is None
+
+
+class TestResolverAssessorDoCupom:
+    MAPA = {"100.00% - BRUNA": "bruna.tassia@multprivate.seg.br"}
+    NOMES = {"bruna.tassia@multprivate.seg.br": "Bruna Tassia"}
+
+    def test_cupom_mapeado_normaliza_chave(self):
+        assert resolver_assessor_do_cupom(" 100.00% - bruna ", self.MAPA, self.NOMES) == "Bruna Tassia"
+
+    def test_sem_cupom_ou_nao_mapeado_ou_sem_usuario(self):
+        assert resolver_assessor_do_cupom("", self.MAPA, self.NOMES) is None
+        assert resolver_assessor_do_cupom("100.00% - OUTRO", self.MAPA, self.NOMES) is None
+        assert resolver_assessor_do_cupom("100.00% - BRUNA", self.MAPA, {}) is None
